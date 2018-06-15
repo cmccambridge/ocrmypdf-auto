@@ -1,6 +1,7 @@
+import logging
+import os
 import sys
 import time
-import logging
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from plumbum import local, BG
@@ -11,8 +12,8 @@ current_files = {}
 
 threadpool = None
 
-INPUT_BASE = local.path('/input')
-OUTPUT_BASE = local.path('/output')
+INPUT_BASE = local.path(os.getenv('OCR_INPUT_DIR', '/input'))
+OUTPUT_BASE = local.path(os.getenv('OCR_OUTPUT_DIR', '/output'))
 OCRMYPDF = local['ocrmypdf']
 
 def run_ocrmypdf(path):
@@ -24,6 +25,12 @@ def run_ocrmypdf(path):
 def process_ocr_file(ocrfile):
     ocrfile.process()
 
+def try_float(string, default_value):
+    try:
+        return float(string)
+    except (ValueError, TypeError):
+        return default_value
+
 class OcrFile(object):
 
     NEW = 'NEW'
@@ -32,7 +39,7 @@ class OcrFile(object):
     ACTIVE = 'ACTIVE'
     DONE = 'DONE'
 
-    COALESCING_DELAY = timedelta(seconds=5.0)
+    COALESCING_DELAY = timedelta(seconds=try_float(os.getenv('OCR_PROCESSING_DELAY'), 3.0))
 
     def __init__(self, path):
         self.path = path
@@ -151,7 +158,6 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO,
                         format='%(asctime)s - %(message)s',
                         datefmt='%Y-%m-%d %H:%M:%S')
-    path = sys.argv[1] if len(sys.argv) > 1 else INPUT_BASE
 
     # Create a ThreadPooLExecutor for the OCR tasks
     with ThreadPoolExecutor(max_workers=3) as tp:
@@ -162,7 +168,7 @@ if __name__ == "__main__":
         
         # Schedule watchdog to observe the input path
         observer = Observer()
-        observer.schedule(event_handler, path, recursive=True)
+        observer.schedule(event_handler, INPUT_BASE, recursive=True)
         observer.start()
         
         logging.info("Ready.")
