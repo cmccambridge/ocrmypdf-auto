@@ -1,9 +1,11 @@
 import logging
 import os
+import signal
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
+from threading import Event
 from plumbum import local, BG
 from watchdog.observers import Observer
 from watchdog.events import PatternMatchingEventHandler
@@ -154,11 +156,25 @@ class AutoOcrEventHandler(PatternMatchingEventHandler):
         logging.debug("File modified: %s", event.src_path)
         self.touch_file(local.path(event.src_path))
 
+class DockerSignalMonitor(object):
+
+    def __init__(self):
+        self.exit_event = Event()
+        signal.signal(signal.SIGINT, self.handler)
+        signal.signal(signal.SIGTERM, self.handler)
+
+    def handler(self, signum, frame):
+        self.exit_event.set()
+
+    def wait_for_exit(self):
+        self.exit_event.wait()
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO,
                         format='%(asctime)s - %(message)s',
                         datefmt='%Y-%m-%d %H:%M:%S')
+
+    docker_monitor = DockerSignalMonitor()
 
     # Create a ThreadPooLExecutor for the OCR tasks
     with ThreadPoolExecutor(max_workers=3) as tp:
@@ -175,13 +191,7 @@ if __name__ == "__main__":
         logging.info('Watching %s...', INPUT_BASE)
 
         # Wait in the main thread to be killed
-        try:
-            while True:
-                time.sleep(1)
-                for path in current_files:
-                    print(current_files[path])
-        except KeyboardInterrupt:
-            pass
+        docker_monitor.wait_for_exit()
 
         logging.info('Shutting down...')
 
