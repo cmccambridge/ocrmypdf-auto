@@ -10,7 +10,7 @@ from plumbum import local, BG
 from watchdog.observers import Observer
 from watchdog.events import PatternMatchingEventHandler
 
-current_files = {}
+current_tasks = {}
 
 threadpool = None
 
@@ -24,8 +24,8 @@ def run_ocrmypdf(path):
     future.wait()
     logging.debug(future.stdout)
 
-def process_ocr_file(ocrfile):
-    ocrfile.process()
+def process_ocrtask(task):
+    task.process()
 
 def try_float(string, default_value):
     try:
@@ -33,7 +33,7 @@ def try_float(string, default_value):
     except (ValueError, TypeError):
         return default_value
 
-class OcrFile(object):
+class OcrTask(object):
 
     NEW = 'NEW'
     QUEUED = 'QUEUED'
@@ -47,42 +47,42 @@ class OcrFile(object):
         self.path = path
         self.last_touch = None
         self.future = None
-        self.state = OcrFile.NEW
+        self.state = OcrTask.NEW
         self.touch()
 
     def __str__(self):
         return self.__repr__()
 
     def __repr__(self):
-        return "<OcrFile [{}] {} last_touch={} future={}>".format(
+        return "<OcrTask [{}] {} last_touch={} future={}>".format(
                 self.state,
                 self.path,
                 self.last_touch,
                 self.future)
 
     def enqueue(self):
-        assert self.state in [OcrFile.NEW, OcrFile.ACTIVE]
-        self.state = OcrFile.QUEUED
-        logging.debug('OcrFile Enqueued: [%s] %s', self.state, self.path)
-        self.future = threadpool.submit(process_ocr_file, self)
+        assert self.state in [OcrTask.NEW, OcrTask.ACTIVE]
+        self.state = OcrTask.QUEUED
+        logging.debug('OcrTask Enqueued: [%s] %s', self.state, self.path)
+        self.future = threadpool.submit(process_ocrtask, self)
 
     def touch(self):
-        logging.debug('OcrFile Touched: [%s] %s', self.state, self.path)
+        logging.debug('OcrTask Touched: [%s] %s', self.state, self.path)
         self.last_touch = datetime.now()
-        if self.state == OcrFile.NEW:
+        if self.state == OcrTask.NEW:
             self.enqueue()
 
     def cancel(self):
-        logging.debug('OcrFile Canceled: [%s] %s', self.state, self.path)
+        logging.debug('OcrTask Canceled: [%s] %s', self.state, self.path)
         self.last_touch = None
-        if self.state == OcrFile.QUEUED:
+        if self.state == OcrTask.QUEUED:
             self.future.cancel()
             self.done()
 
     def done(self):
-        logging.debug('OcrFile Done: [%s] %s', self.state, self.path)
-        self.state = OcrFile.DONE
-        del current_files[self.path]
+        logging.debug('OcrTask Done: [%s] %s', self.state, self.path)
+        self.state = OcrTask.DONE
+        del current_tasks[self.path]
 
     def process(self, skip_delay=False):
         """ocrmypdf processing task"""
@@ -96,16 +96,16 @@ class OcrFile(object):
                 self.done()
                 return
 
-            due = self.last_touch + OcrFile.COALESCING_DELAY
+            due = self.last_touch + OcrTask.COALESCING_DELAY
             wait_span = due - datetime.now()
             if wait_span <= timedelta(0):
                 break;
             logging.debug('Sleeping for %f: [%s] %s', wait_span.total_seconds(), self.state, self.path)
-            self.state = OcrFile.SLEEPING
+            self.state = OcrTask.SLEEPING
             time.sleep(wait_span.total_seconds())
 
         # Actually run ocrmypdf
-        self.state = OcrFile.ACTIVE
+        self.state = OcrTask.ACTIVE
         self.last_touch = None
         logging.info('Running ocrmypdf: %s', self.path)
         run_ocrmypdf(self.path)
@@ -130,14 +130,14 @@ class AutoOcrEventHandler(PatternMatchingEventHandler):
         super(AutoOcrEventHandler, self).__init__(patterns = ["*.pdf"], ignore_directories=True)
 
     def touch_file(self, path):
-        if path in current_files:
-            current_files[path].touch()
+        if path in current_tasks:
+            current_tasks[path].touch()
         else:
-            current_files[path] = OcrFile(path)
+            current_tasks[path] = OcrTask(path)
 
     def delete_file(self, path):
-        if path in current_files:
-            current_files[path].cancel()
+        if path in current_tasks:
+            current_tasks[path].cancel()
 
     def on_moved(self, event):
         logging.debug("File moved: %s -> %s", event.src_path, event.dest_path)
@@ -195,9 +195,9 @@ if __name__ == "__main__":
 
         logging.info('Shutting down...')
 
-        ocrfiles = [ocrfile for _, ocrfile in current_files.items()]
-        for ocrfile in ocrfiles:
-            ocrfile.cancel()
+        tasks = [task for _, task in current_tasks.items()]
+        for task in tasks:
+            task.cancel()
 
         observer.unschedule_all()
         observer.stop()
