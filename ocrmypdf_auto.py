@@ -20,7 +20,7 @@ def run_ocrmypdf(path):
     out_path = OUTPUT_BASE / (path - INPUT_BASE)
     future = OCRMYPDF['--deskew', path, out_path] & BG
     future.wait()
-    logging.info(future.stdout)
+    logging.debug(future.stdout)
 
 def process_ocr_file(ocrfile):
     ocrfile.process()
@@ -61,36 +61,36 @@ class OcrFile(object):
     def enqueue(self):
         assert self.state in [OcrFile.NEW, OcrFile.ACTIVE]
         self.state = OcrFile.QUEUED
-        logging.info('OcrFile Enqueued: [%s] %s', self.state, self.path)
+        logging.debug('OcrFile Enqueued: [%s] %s', self.state, self.path)
         self.future = threadpool.submit(process_ocr_file, self)
 
     def touch(self):
-        logging.info('OcrFile Touched: [%s] %s', self.state, self.path)
+        logging.debug('OcrFile Touched: [%s] %s', self.state, self.path)
         self.last_touch = datetime.now()
         if self.state == OcrFile.NEW:
             self.enqueue()
 
     def cancel(self):
-        logging.info('OcrFile Canceled: [%s] %s', self.state, self.path)
+        logging.debug('OcrFile Canceled: [%s] %s', self.state, self.path)
         self.last_touch = None
         if self.state == OcrFile.QUEUED:
             self.future.cancel()
             self.done()
 
     def done(self):
-        logging.info('OcrFile Done: [%s] %s', self.state, self.path)
+        logging.debug('OcrFile Done: [%s] %s', self.state, self.path)
         self.state = OcrFile.DONE
         del current_files[self.path]
 
     def process(self, skip_delay=False):
         """ocrmypdf processing task"""
-        logging.info('Processing: [%s] %s', self.state, self.path)
+        logging.info('Processing: %s', self.path)
 
         # Coalescing sleep as long as file is still being modified
         while not skip_delay:
             # Check for cancellation
             if self.last_touch is None:
-                logging.info('Processing canceled: [%s] %s', self.state, self.path)
+                logging.info('Processing canceled: %s', self.path)
                 self.done()
                 return
 
@@ -98,15 +98,16 @@ class OcrFile(object):
             wait_span = due - datetime.now()
             if wait_span <= timedelta(0):
                 break;
-            logging.info('Processing sleeping for %f: [%s] %s', wait_span.total_seconds(), self.state, self.path)
+            logging.debug('Sleeping for %f: [%s] %s', wait_span.total_seconds(), self.state, self.path)
             self.state = OcrFile.SLEEPING
             time.sleep(wait_span.total_seconds())
 
         # Actually run ocrmypdf
         self.state = OcrFile.ACTIVE
         self.last_touch = None
-        logging.info('Running ocrmypdf: [%s] %s', self.state, self.path)
+        logging.info('Running ocrmypdf: %s', self.path)
         run_ocrmypdf(self.path)
+        logging.info('Finished ocrmypdf: %s', self.path)
 
         # Check for modification during sleep
         if self.last_touch is not None:
@@ -137,20 +138,20 @@ class AutoOcrEventHandler(PatternMatchingEventHandler):
             current_files[path].cancel()
 
     def on_moved(self, event):
-        logging.info("File moved: %s -> %s", event.src_path, event.dest_path)
+        logging.debug("File moved: %s -> %s", event.src_path, event.dest_path)
         self.delete_file(local.path(event.src_path))
         self.touch_file(local.path(event.dest_path))
 
     def on_created(self, event):
-        logging.info("File created: %s", event.src_path)
+        logging.debug("File created: %s", event.src_path)
         self.touch_file(local.path(event.src_path))
 
     def on_deleted(self, event):
-        logging.info("File deleted: %s", event.src_path)
+        logging.debug("File deleted: %s", event.src_path)
         self.delete_file(local.path(event.src_path))
 
     def on_modified(self, event):
-        logging.info("File modified: %s", event.src_path)
+        logging.debug("File modified: %s", event.src_path)
         self.touch_file(local.path(event.src_path))
 
 
@@ -171,7 +172,8 @@ if __name__ == "__main__":
         observer.schedule(event_handler, INPUT_BASE, recursive=True)
         observer.start()
         
-        logging.info("Ready.")
+        logging.info('Watching %s...', INPUT_BASE)
+
         # Wait in the main thread to be killed
         try:
             while True:
@@ -180,6 +182,8 @@ if __name__ == "__main__":
                     print(current_files[path])
         except KeyboardInterrupt:
             pass
+
+        logging.info('Shutting down...')
 
         ocrfiles = [ocrfile for _, ocrfile in current_files.items()]
         for ocrfile in ocrfiles:
