@@ -1,14 +1,13 @@
 import logging
 import os
-import signal
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
-from threading import Event
 from plumbum import local, BG
 from watchdog.observers import Observer
 from watchdog.events import PatternMatchingEventHandler
+from docker_support import DockerSignalMonitor
 
 current_tasks = {}
 
@@ -155,24 +154,6 @@ class AutoOcrEventHandler(PatternMatchingEventHandler):
     def on_modified(self, event):
         logging.debug("File modified: %s", event.src_path)
         self.touch_file(local.path(event.src_path))
-
-class DockerSignalMonitor(object):
-
-    SIGNUMS_TO_NAMES = { getattr(signal, signame) : signame for signame in ['SIGINT', 'SIGTERM'] }
-
-    def __init__(self):
-        self.exit_event = Event()
-        self.signum = None
-        signal.signal(signal.SIGINT, self.handler)
-        signal.signal(signal.SIGTERM, self.handler)
-
-    def handler(self, signum, frame):
-        self.signum = signum
-        self.exit_event.set()
-
-    def wait_for_exit(self):
-        self.exit_event.wait()
-        return self.signum
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO,
