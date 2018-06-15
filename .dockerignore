@@ -3,3 +3,6 @@
 *~
 
 Dockerfile
+env/
+testin/
+testout/

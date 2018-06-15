@@ -23,7 +23,7 @@ if [[ "$1" != "/"* ]]; then
 
     . /appenv/bin/activate
     cd /app
-    exec gosu docker ocrmypdf "$@"
+    exec gosu docker python3 ocrmypdf_auto.py "$@"
 fi
 
 exec "$@"
