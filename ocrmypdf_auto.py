@@ -9,6 +9,8 @@ from watchdog.observers import Observer
 from watchdog.events import PatternMatchingEventHandler
 from docker_support import DockerSignalMonitor
 
+logger = logging.getLogger('ocrmypdf-auto')
+
 current_tasks = {}
 
 threadpool = None
@@ -18,10 +20,11 @@ OUTPUT_BASE = local.path(os.getenv('OCR_OUTPUT_DIR', '/output'))
 OCRMYPDF = local['ocrmypdf']
 
 def run_ocrmypdf(path):
+    run_logger = logger.getChild('run')
     out_path = OUTPUT_BASE / (path - INPUT_BASE)
     future = OCRMYPDF['--deskew', path, out_path] & BG
     future.wait()
-    logging.debug(future.stdout)
+    run_logger.debug(future.stdout)
 
 def process_ocrtask(task):
     task.process()
@@ -43,6 +46,7 @@ class OcrTask(object):
     COALESCING_DELAY = timedelta(seconds=try_float(os.getenv('OCR_PROCESSING_DELAY'), 3.0))
 
     def __init__(self, path):
+        self.logger = logger.getChild('OcrTask')
         self.path = path
         self.last_touch = None
         self.future = None
@@ -62,36 +66,36 @@ class OcrTask(object):
     def enqueue(self):
         assert self.state in [OcrTask.NEW, OcrTask.ACTIVE]
         self.state = OcrTask.QUEUED
-        logging.debug('OcrTask Enqueued: [%s] %s', self.state, self.path)
+        self.logger.debug('OcrTask Enqueued: [%s] %s', self.state, self.path)
         self.future = threadpool.submit(process_ocrtask, self)
 
     def touch(self):
-        logging.debug('OcrTask Touched: [%s] %s', self.state, self.path)
+        self.logger.debug('OcrTask Touched: [%s] %s', self.state, self.path)
         self.last_touch = datetime.now()
         if self.state == OcrTask.NEW:
             self.enqueue()
 
     def cancel(self):
-        logging.debug('OcrTask Canceled: [%s] %s', self.state, self.path)
+        self.logger.debug('OcrTask Canceled: [%s] %s', self.state, self.path)
         self.last_touch = None
         if self.state == OcrTask.QUEUED:
             self.future.cancel()
             self.done()
 
     def done(self):
-        logging.debug('OcrTask Done: [%s] %s', self.state, self.path)
+        self.logger.debug('OcrTask Done: [%s] %s', self.state, self.path)
         self.state = OcrTask.DONE
         del current_tasks[self.path]
 
     def process(self, skip_delay=False):
         """ocrmypdf processing task"""
-        logging.info('Processing: %s', self.path)
+        self.logger.info('Processing: %s', self.path)
 
         # Coalescing sleep as long as file is still being modified
         while not skip_delay:
             # Check for cancellation
             if self.last_touch is None:
-                logging.info('Processing canceled: %s', self.path)
+                self.logger.info('Processing canceled: %s', self.path)
                 self.done()
                 return
 
@@ -99,20 +103,20 @@ class OcrTask(object):
             wait_span = due - datetime.now()
             if wait_span <= timedelta(0):
                 break;
-            logging.debug('Sleeping for %f: [%s] %s', wait_span.total_seconds(), self.state, self.path)
+            self.logger.debug('Sleeping for %f: [%s] %s', wait_span.total_seconds(), self.state, self.path)
             self.state = OcrTask.SLEEPING
             time.sleep(wait_span.total_seconds())
 
         # Actually run ocrmypdf
         self.state = OcrTask.ACTIVE
         self.last_touch = None
-        logging.info('Running ocrmypdf: %s', self.path)
+        self.logger.info('Running ocrmypdf: %s', self.path)
         run_ocrmypdf(self.path)
-        logging.info('Finished ocrmypdf: %s', self.path)
+        self.logger.info('Finished ocrmypdf: %s', self.path)
 
         # Check for modification during sleep
         if self.last_touch is not None:
-            logging.info('Modified during ocrmypdf execution: [%s] %s', self.state, self.path)
+            self.logger.info('Modified during ocrmypdf execution: [%s] %s', self.state, self.path)
             self.enqueue()
             return
 
@@ -127,6 +131,7 @@ class AutoOcrEventHandler(PatternMatchingEventHandler):
 
     def __init__(self):
         super(AutoOcrEventHandler, self).__init__(patterns = ["*.pdf"], ignore_directories=True)
+        self.logger = logger.getChild('AutoOcrEventHandler')
 
     def touch_file(self, path):
         if path in current_tasks:
@@ -139,25 +144,25 @@ class AutoOcrEventHandler(PatternMatchingEventHandler):
             current_tasks[path].cancel()
 
     def on_moved(self, event):
-        logging.debug("File moved: %s -> %s", event.src_path, event.dest_path)
+        self.logger.debug("File moved: %s -> %s", event.src_path, event.dest_path)
         self.delete_file(local.path(event.src_path))
         self.touch_file(local.path(event.dest_path))
 
     def on_created(self, event):
-        logging.debug("File created: %s", event.src_path)
+        self.logger.debug("File created: %s", event.src_path)
         self.touch_file(local.path(event.src_path))
 
     def on_deleted(self, event):
-        logging.debug("File deleted: %s", event.src_path)
+        self.logger.debug("File deleted: %s", event.src_path)
         self.delete_file(local.path(event.src_path))
 
     def on_modified(self, event):
-        logging.debug("File modified: %s", event.src_path)
+        self.logger.debug("File modified: %s", event.src_path)
         self.touch_file(local.path(event.src_path))
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO,
-                        format='%(asctime)s - %(message)s',
+    logging.basicConfig(level=logging.DEBUG,
+                        format='%(asctime)s [%(threadName)s] - %(message)s',
                         datefmt='%Y-%m-%d %H:%M:%S')
 
     docker_monitor = DockerSignalMonitor()
@@ -173,13 +178,13 @@ if __name__ == "__main__":
         observer = Observer()
         observer.schedule(event_handler, INPUT_BASE, recursive=True)
         observer.start()
-        
-        logging.info('Watching %s...', INPUT_BASE)
+
+        logger.info('Watching %s...', INPUT_BASE)
 
         # Wait in the main thread to be killed
         signum = docker_monitor.wait_for_exit()
 
-        logging.info('Signal %d (%s) Received. Shutting down...', signum, DockerSignalMonitor.SIGNUMS_TO_NAMES[signum])
+        logger.info('Signal %d (%s) Received. Shutting down...', signum, DockerSignalMonitor.SIGNUMS_TO_NAMES[signum])
 
         tasks = [task for _, task in current_tasks.items()]
         for task in tasks:
