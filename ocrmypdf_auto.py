@@ -4,16 +4,13 @@ import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
+from functools import partial
 from plumbum import local, BG
 from watchdog.observers import Observer
 from watchdog.events import PatternMatchingEventHandler
 from docker_support import DockerSignalMonitor
 
 logger = logging.getLogger('ocrmypdf-auto')
-
-current_tasks = {}
-
-threadpool = None
 
 INPUT_BASE = local.path(os.getenv('OCR_INPUT_DIR', '/input'))
 OUTPUT_BASE = local.path(os.getenv('OCR_OUTPUT_DIR', '/output'))
@@ -22,7 +19,7 @@ OCRMYPDF = local['ocrmypdf']
 class OcrmypdfConfig(object):
 
     def __init__(self, input_path, output_path, config_file=None):
-        self.logger = logger.getChild('OcrmypdfConfig')
+        self.logger = logger.getChild('config')
         self.input_path = local.path(input_path)
         self.output_path = local.path(output_path)
         self.options = {}
@@ -48,10 +45,10 @@ class OcrmypdfConfig(object):
         if looks_like_yes(rotate):
             self.options['--rotate-pages'] = None
 
-        rotate_confidence = os.getenv('OCR_ROTATE_CONFIDENCE')
-        rotate_confidence = try_float(rotate_confidence, None)
-        if rotate_confidence is not None:
-            self.options['--rotate-pages-threshold'] = rotate_confidence
+            rotate_confidence = os.getenv('OCR_ROTATE_CONFIDENCE')
+            rotate_confidence = try_float(rotate_confidence, None)
+            if rotate_confidence is not None:
+                self.options['--rotate-pages-threshold'] = rotate_confidence
 
         deskew = os.getenv('OCR_DESKEW', '0')
         if looks_like_yes(deskew):
@@ -112,9 +109,11 @@ class OcrTask(object):
 
     COALESCING_DELAY = timedelta(seconds=try_float(os.getenv('OCR_PROCESSING_DELAY'), 3.0))
 
-    def __init__(self, path):
-        self.logger = logger.getChild('OcrTask')
+    def __init__(self, path, submit_func, done_callback):
+        self.logger = logger.getChild('task')
         self.path = path
+        self.submit_func = submit_func
+        self.done_callback = done_callback
         self.last_touch = None
         self.future = None
         self.state = OcrTask.NEW
@@ -134,7 +133,7 @@ class OcrTask(object):
         assert self.state in [OcrTask.NEW, OcrTask.ACTIVE]
         self.state = OcrTask.QUEUED
         self.logger.debug('OcrTask Enqueued: [%s] %s', self.state, self.path)
-        self.future = threadpool.submit(process_ocrtask, self)
+        self.future = self.submit_func(self.process)
 
     def touch(self):
         self.logger.debug('OcrTask Touched: [%s] %s', self.state, self.path)
@@ -152,7 +151,8 @@ class OcrTask(object):
     def done(self):
         self.logger.debug('OcrTask Done: [%s] %s', self.state, self.path)
         self.state = OcrTask.DONE
-        del current_tasks[self.path]
+        if self.done_callback:
+            self.done_callback(self)
 
     def process(self, skip_delay=False):
         """ocrmypdf processing task"""
@@ -191,24 +191,24 @@ class OcrTask(object):
         self.done()
 
 
-class AutoOcrEventHandler(PatternMatchingEventHandler):
+class AutoOcrWatchdogHandler(PatternMatchingEventHandler):
     """
     Matches files to process through ocrmypdf and kicks off processing
     """
 
-    def __init__(self):
-        super(AutoOcrEventHandler, self).__init__(patterns = ["*.pdf"], ignore_directories=True)
-        self.logger = logger.getChild('AutoOcrEventHandler')
+    def __init__(self, file_touched_callback, file_deleted_callback):
+        super(AutoOcrWatchdogHandler, self).__init__(patterns = ["*.pdf"], ignore_directories=True)
+        self.logger = logger.getChild('watchdog_handler')
+        self.file_touched_callback = file_touched_callback
+        self.file_deleted_callback = file_deleted_callback
 
     def touch_file(self, path):
-        if path in current_tasks:
-            current_tasks[path].touch()
-        else:
-            current_tasks[path] = OcrTask(path)
+        if self.file_touched_callback:
+            self.file_touched_callback(path)
 
     def delete_file(self, path):
-        if path in current_tasks:
-            current_tasks[path].cancel()
+        if self.file_deleted_callback:
+            self.file_deleted_callback(path)
 
     def on_moved(self, event):
         self.logger.debug("File moved: %s -> %s", event.src_path, event.dest_path)
@@ -227,6 +227,72 @@ class AutoOcrEventHandler(PatternMatchingEventHandler):
         self.logger.debug("File modified: %s", event.src_path)
         self.touch_file(local.path(event.src_path))
 
+
+class AutoOcrScheduler(object):
+
+    def __init__(self):
+        self.logger = logger.getChild('scheduler')
+
+        self.input_path = INPUT_BASE
+        self.current_tasks = {}
+
+        # Create a Threadpool to run OCR tasks on
+        self.threadpool = ThreadPoolExecutor(max_workers=3)
+
+        # Wire up an AutoOcrWatchdogHandler
+        watchdog_handler = AutoOcrWatchdogHandler(self.on_file_touched, self.on_file_deleted)
+
+        # Schedule watchdog to observe the input path
+        self.observer = Observer()
+        self.observer.schedule(watchdog_handler, INPUT_BASE, recursive=True)
+
+    def start(self):
+        self.observer.start()
+        self.logger.debug('Watching %s', self.input_path)
+
+    def shutdown(self):
+        # Shut down the feed of incoming watchdog events
+        if self.observer:
+            self.observer.unschedule_all()
+            self.observer.stop()
+
+        # Cancel all outstanding cancelable tasks
+        tasks = [task for _, task in self.current_tasks.items()]
+        for task in tasks:
+            task.cancel()
+
+        # Wait for the threadpool to clean up
+        if self.threadpool:
+            self.threadpool.shutdown()
+            self.threadpool = None
+
+        # Wait for the watchdog to clean up
+        if self.observer:
+            self.observer.join()
+            self.observer = None
+
+    def __enter__(self):
+        self.start()
+        return self
+
+    def __exit__(self, *args):
+        self.shutdown()
+        return False
+
+    def on_file_touched(self, path):
+        if path in self.current_tasks:
+            self.current_tasks[path].touch()
+        else:
+            self.current_tasks[path] = OcrTask(path, self.threadpool.submit, self.on_task_done)
+
+    def on_file_deleted(self, path):
+        if path in self.current_tasks:
+            self.current_tasks[path].cancel()
+
+    def on_task_done(self, task):
+        del self.current_tasks[task.path]
+
+
 if __name__ == "__main__":
     logging.basicConfig(level=logging.DEBUG,
                         format='%(asctime)s [%(threadName)s] - %(message)s',
@@ -234,30 +300,9 @@ if __name__ == "__main__":
 
     docker_monitor = DockerSignalMonitor()
 
-    # Create a ThreadPooLExecutor for the OCR tasks
-    with ThreadPoolExecutor(max_workers=3) as tp:
-        threadpool = tp
-
-        # Create our OCR file watchdog event handler
-        event_handler = AutoOcrEventHandler()
-        
-        # Schedule watchdog to observe the input path
-        observer = Observer()
-        observer.schedule(event_handler, INPUT_BASE, recursive=True)
-        observer.start()
-
-        logger.info('Watching %s...', INPUT_BASE)
-
+    # Run an AutoOcrScheduler until terminated
+    with AutoOcrScheduler() as scheduler:
         # Wait in the main thread to be killed
         signum = docker_monitor.wait_for_exit()
-
         logger.info('Signal %d (%s) Received. Shutting down...', signum, DockerSignalMonitor.SIGNUMS_TO_NAMES[signum])
-
-        tasks = [task for _, task in current_tasks.items()]
-        for task in tasks:
-            task.cancel()
-
-        observer.unschedule_all()
-        observer.stop()
-        observer.join()
 
