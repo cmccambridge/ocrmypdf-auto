@@ -156,7 +156,8 @@ class OcrTask(object):
 
     def process(self, skip_delay=False):
         """ocrmypdf processing task"""
-        self.logger.info('Processing: %s', self.path)
+        self.logger.warn('Processing: %s', self.path)
+        start_ts = datetime.now()
 
         # Coalescing sleep as long as file is still being modified
         while not skip_delay:
@@ -179,7 +180,8 @@ class OcrTask(object):
         self.last_touch = None
         self.logger.info('Running ocrmypdf: %s', self.path)
         run_ocrmypdf(self.path)
-        self.logger.info('Finished ocrmypdf: %s', self.path)
+        runtime = datetime.now() - start_ts
+        self.logger.warn('Processing complete in %f seconds: %s', round(runtime.total_seconds(), 2), self.path)
 
         # Check for modification during sleep
         if self.last_touch is not None:
@@ -248,26 +250,30 @@ class AutoOcrScheduler(object):
 
     def start(self):
         self.observer.start()
-        self.logger.debug('Watching %s', self.input_path)
+        self.logger.warn('Watching %s', self.input_path)
 
     def shutdown(self):
         # Shut down the feed of incoming watchdog events
         if self.observer:
+            self.logger.debug('Shutting down filesystem watchdog...')
             self.observer.unschedule_all()
             self.observer.stop()
 
         # Cancel all outstanding cancelable tasks
+        self.logger.debug('Canceling all %d in-flight tasks...', len(self.current_tasks))
         tasks = [task for _, task in self.current_tasks.items()]
         for task in tasks:
             task.cancel()
 
         # Wait for the threadpool to clean up
         if self.threadpool:
+            self.logger.debug('Shutting down threadpool...')
             self.threadpool.shutdown()
             self.threadpool = None
 
         # Wait for the watchdog to clean up
         if self.observer:
+            self.logger.debug('Cleaning up filesystem watchdog...')
             self.observer.join()
             self.observer = None
 
@@ -294,9 +300,22 @@ class AutoOcrScheduler(object):
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.DEBUG,
-                        format='%(asctime)s [%(threadName)s] - %(message)s',
-                        datefmt='%Y-%m-%d %H:%M:%S')
+    logging_level = os.getenv('OCR_VERBOSITY')
+    if logging_level is None:
+        logging_level = logging.WARNING
+    elif getattr(logging, logging_level.upper(), None) is not None:
+        logging_level = getattr(logging, logging_level.upper())
+    else:
+        logging_level = int(try_float(logging_level, logging.WARNING))
+
+    if logging_level < logging.WARNING:
+        logging.basicConfig(level=logging_level,
+                            format='%(asctime)s [%(threadName)s] - %(message)s',
+                            datefmt='%Y-%m-%d %H:%M:%S')
+    else:
+        logging.basicConfig(level=logging_level,
+                            format='%(asctime)s - %(message)s',
+                            datefmt='%Y-%m-%d %H:%M:%S')
 
     docker_monitor = DockerSignalMonitor()
 
@@ -304,5 +323,5 @@ if __name__ == "__main__":
     with AutoOcrScheduler() as scheduler:
         # Wait in the main thread to be killed
         signum = docker_monitor.wait_for_exit()
-        logger.info('Signal %d (%s) Received. Shutting down...', signum, DockerSignalMonitor.SIGNUMS_TO_NAMES[signum])
+        logger.warn('Signal %d (%s) Received. Shutting down...', signum, DockerSignalMonitor.SIGNUMS_TO_NAMES[signum])
 
