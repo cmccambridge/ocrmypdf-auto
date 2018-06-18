@@ -19,12 +19,76 @@ INPUT_BASE = local.path(os.getenv('OCR_INPUT_DIR', '/input'))
 OUTPUT_BASE = local.path(os.getenv('OCR_OUTPUT_DIR', '/output'))
 OCRMYPDF = local['ocrmypdf']
 
+class OcrmypdfConfig(object):
+
+    def __init__(self, input_path, output_path, config_file=None):
+        self.logger = logger.getChild('OcrmypdfConfig')
+        self.input_path = local.path(input_path)
+        self.output_path = local.path(output_path)
+        self.options = {}
+        self.set_default_options()
+        self.parse_config_file(config_file)
+
+    def set_default_options(self):
+        def looks_like_yes(string):
+            return string is not None and string.lower() in ['1', 'y', 'yes', 'on', 't', 'true']
+
+        langs = os.getenv('OCR_LANGUAGES')
+        if langs is not None:
+            self.options['--language'] = langs
+
+        sidecar = os.getenv('OCR_GENERATE_SIDECAR', '0')
+        if looks_like_yes(sidecar):
+            self.options['--sidecar'] = self.output_path.with_suffix('.txt')
+
+        jobs = os.getenv('OCR_CPUS_PER_JOB', '1')
+        self.options['--jobs'] = jobs
+
+        rotate = os.getenv('OCR_ROTATE', '0')
+        if looks_like_yes(rotate):
+            self.options['--rotate-pages'] = None
+
+        rotate_confidence = os.getenv('OCR_ROTATE_CONFIDENCE')
+        rotate_confidence = try_float(rotate_confidence, None)
+        if rotate_confidence is not None:
+            self.options['--rotate-pages-threshold'] = rotate_confidence
+
+        deskew = os.getenv('OCR_DESKEW', '0')
+        if looks_like_yes(deskew):
+            self.options['--deskew'] = None
+
+        clean = os.getenv('OCR_CLEAN', '0')
+        if looks_like_yes(clean):
+            self.options['--clean'] = None
+        elif clean.lower() in ('final'):
+            self.options['--clean-final'] = None
+
+        skip_text = os.getenv('OCR_SKIP_TEXT', '0')
+        if looks_like_yes(skip_text):
+            self.options['--skip-text'] = None
+
+        #TODO: Config path for user words & patterns
+
+    def parse_config_file(self, config_file):
+        pass
+
+    def get_ocrmypdf_arguments(self):
+        args = []
+        for arg, val in self.options.items():
+            args.append(arg)
+            if val is not None:
+                args.append(val)
+        args.append(self.input_path)
+        args.append(self.output_path)
+        return args
+
 def run_ocrmypdf(path):
     run_logger = logger.getChild('run')
     out_path = OUTPUT_BASE / (path - INPUT_BASE)
-    future = OCRMYPDF['--deskew', path, out_path] & BG
-    future.wait()
-    run_logger.debug(future.stdout)
+    config = OcrmypdfConfig(path, out_path)
+    ocrmypdf = OCRMYPDF.__getitem__(config.get_ocrmypdf_arguments())
+    (rc, stdout, stderr) = ocrmypdf.run()
+    run_logger.debug('ocrmypdf returns %d with stdout [%s] and stderr[%s]', rc, stdout, stderr)
 
 def process_ocrtask(task):
     try:
