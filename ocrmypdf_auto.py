@@ -27,7 +27,10 @@ def run_ocrmypdf(path):
     run_logger.debug(future.stdout)
 
 def process_ocrtask(task):
-    task.process()
+    try:
+        task.process()
+    except BaseException:
+        logger.warn('Unhandled Exception: %s', sys.exc_info())
 
 def try_float(string, default_value):
     try:
