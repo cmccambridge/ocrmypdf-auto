@@ -79,20 +79,6 @@ class OcrmypdfConfig(object):
         args.append(self.output_path)
         return args
 
-def run_ocrmypdf(path):
-    run_logger = logger.getChild('run')
-    out_path = OUTPUT_BASE / (path - INPUT_BASE)
-    config = OcrmypdfConfig(path, out_path)
-    ocrmypdf = OCRMYPDF.__getitem__(config.get_ocrmypdf_arguments())
-    (rc, stdout, stderr) = ocrmypdf.run()
-    run_logger.debug('ocrmypdf returns %d with stdout [%s] and stderr[%s]', rc, stdout, stderr)
-
-def process_ocrtask(task):
-    try:
-        task.process()
-    except BaseException:
-        logger.warn('Unhandled Exception: %s', sys.exc_info())
-
 def try_float(string, default_value):
     try:
         return float(string)
@@ -179,7 +165,15 @@ class OcrTask(object):
         self.state = OcrTask.ACTIVE
         self.last_touch = None
         self.logger.info('Running ocrmypdf: %s', self.path)
-        run_ocrmypdf(self.path)
+
+        # TODO: Take output path from ctor
+        out_path = OUTPUT_BASE / (self.path - INPUT_BASE)
+        # TODO: Take config from ctor
+        config = OcrmypdfConfig(self.path, out_path)
+        ocrmypdf = OCRMYPDF.__getitem__(config.get_ocrmypdf_arguments())
+        (rc, stdout, stderr) = ocrmypdf.run()
+        self.logger.debug('ocrmypdf returns %d with stdout [%s] and stderr[%s]', rc, stdout, stderr)
+
         runtime = datetime.now() - start_ts
         self.logger.warn('Processing complete in %f seconds: %s', round(runtime.total_seconds(), 2), self.path)
 
