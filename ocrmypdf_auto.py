@@ -247,8 +247,6 @@ class AutoOcrScheduler(object):
         # Schedule watchdog to observe the input path
         self.observer = Observer()
         self.observer.schedule(watchdog_handler, INPUT_BASE, recursive=True)
-
-    def start(self):
         self.observer.start()
         self.logger.warn('Watching %s', self.input_path)
 
@@ -278,7 +276,6 @@ class AutoOcrScheduler(object):
             self.observer = None
 
     def __enter__(self):
-        self.start()
         return self
 
     def __exit__(self, *args):
