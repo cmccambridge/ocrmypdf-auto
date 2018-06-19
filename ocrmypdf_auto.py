@@ -18,6 +18,8 @@ class OcrmypdfConfig(object):
         self.logger = logger.getChild('config')
         self.input_path = local.path(input_path)
         self.output_path = local.path(output_path)
+        temp_dir = os.getenv('OCR_TEMP_DIR')
+        self.temp_dir = local.path(temp_dir) if temp_dir else None
         self.options = {}
         self.set_default_options()
         self.parse_config_file(config_file)
@@ -171,7 +173,7 @@ class OcrTask(object):
         if not self.output_path.parent.exists():
             self.logger.debug('Mkdir: %s', self.output_path.parent)
             self.output_path.parent.mkdir()
-        ocrmypdf = OcrTask._OCRMYPDF.__getitem__(config.get_ocrmypdf_arguments())
+        ocrmypdf = OcrTask._OCRMYPDF.__getitem__(config.get_ocrmypdf_arguments()).with_env(TMPDIR=config.temp_dir)
         (rc, stdout, stderr) = ocrmypdf.run()
         self.logger.debug('ocrmypdf returns %d with stdout [%s] and stderr[%s]', rc, stdout, stderr)
 
