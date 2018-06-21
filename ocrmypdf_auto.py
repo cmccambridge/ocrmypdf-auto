@@ -2,6 +2,7 @@ import logging
 import os
 import sys
 import time
+import traceback
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from functools import partial
@@ -134,7 +135,7 @@ class OcrTask(object):
         try:
             self.process()
         except BaseException as e:
-            self.logger.error('Error in OcrTask.process: %s', e)
+            self.logger.error('Error in OcrTask.process: %s', traceback.format_exc())
 
     def process(self, skip_delay=False):
         """ocrmypdf processing task"""
