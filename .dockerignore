@@ -6,3 +6,5 @@ Dockerfile
 env/
 testin/
 testout/
+testconfig/
+testtemp/

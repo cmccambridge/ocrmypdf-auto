@@ -9,3 +9,5 @@ __pycache__/
 /env
 /testin
 /testout
+/testconfig
+/testtemp
