@@ -121,7 +121,7 @@ class OcrTask(object):
         assert self.state in [OcrTask.NEW, OcrTask.ACTIVE]
         self.state = OcrTask.QUEUED
         self.logger.debug('OcrTask Enqueued: [%s] %s', self.state, self.input_path)
-        self.future = self.submit_func(self.process)
+        self.future = self.submit_func(self._safe_process)
 
     def touch(self):
         self.logger.debug('OcrTask Touched: [%s] %s', self.state, self.input_path)
@@ -141,6 +141,12 @@ class OcrTask(object):
         self.state = OcrTask.DONE
         if self.done_callback:
             self.done_callback(self)
+
+    def _safe_process(self):
+        try:
+            self.process()
+        except BaseException as e:
+            self.logger.error('Error in OcrTask.process: %s', e)
 
     def process(self, skip_delay=False):
         """ocrmypdf processing task"""
