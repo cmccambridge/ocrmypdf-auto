@@ -12,6 +12,9 @@ from docker_support import DockerSignalMonitor
 
 logger = logging.getLogger('ocrmypdf-auto')
 
+class OcrmypdfConfigParsingError(Exception):
+    pass
+
 class OcrmypdfConfig(object):
 
     def __init__(self, input_path, output_path, config_file=None):
@@ -22,50 +25,34 @@ class OcrmypdfConfig(object):
         self.temp_dir = local.path(temp_dir) if temp_dir else None
         self.options = {}
         self.set_default_options()
-        self.parse_config_file(config_file)
+        if config_file:
+            self.parse_config_file(config_file)
 
     def set_default_options(self):
-        def looks_like_yes(string):
-            return string is not None and string.lower() in ['1', 'y', 'yes', 'on', 't', 'true']
-
         langs = os.getenv('OCR_LANGUAGES')
         if langs is not None:
             self.options['--language'] = langs
 
-        sidecar = os.getenv('OCR_GENERATE_SIDECAR', '0')
-        if looks_like_yes(sidecar):
-            self.options['--sidecar'] = self.output_path.with_suffix('.txt')
-
-        jobs = os.getenv('OCR_CPUS_PER_JOB', '1')
-        self.options['--jobs'] = jobs
-
-        rotate = os.getenv('OCR_ROTATE', '0')
-        if looks_like_yes(rotate):
-            self.options['--rotate-pages'] = None
-
-            rotate_confidence = os.getenv('OCR_ROTATE_CONFIDENCE')
-            rotate_confidence = try_float(rotate_confidence, None)
-            if rotate_confidence is not None:
-                self.options['--rotate-pages-threshold'] = rotate_confidence
-
-        deskew = os.getenv('OCR_DESKEW', '0')
-        if looks_like_yes(deskew):
-            self.options['--deskew'] = None
-
-        clean = os.getenv('OCR_CLEAN', '0')
-        if looks_like_yes(clean):
-            self.options['--clean'] = None
-        elif clean.lower() in ('final'):
-            self.options['--clean-final'] = None
-
-        skip_text = os.getenv('OCR_SKIP_TEXT', '0')
-        if looks_like_yes(skip_text):
-            self.options['--skip-text'] = None
-
-        #TODO: Config path for user words & patterns
-
     def parse_config_file(self, config_file):
-        pass
+        try:
+            logging.debug('Parsing config %s', config_file)
+            with local.path(config_file).open('r') as file:
+                for line in file:
+                    line = line.strip()
+                    if len(line) == 0 or line[0] == '#':
+                        continue
+                    parts = line.split()
+                    if len(parts) > 2:
+                        raise OcrmypdfConfigParsingError('More than one option and one value in line: {}'.format(line))
+                    opt = parts[0]
+                    val = parts[1] if len(parts) > 1 else None
+                    if opt[0] != '-':
+                        raise OcrmypdfConfigParsingError('Line must start with an option (-f, --foo): {}'.format(line))
+                    self.options[opt] = val
+        except IOError as io:
+            str = 'IOError parsing {}: {}'.format(config_file, io)
+            logger.debug(str)
+            raise OcrmypdfConfigParsingError(str)
 
     def get_ocrmypdf_arguments(self):
         args = []
@@ -95,12 +82,13 @@ class OcrTask(object):
 
     COALESCING_DELAY = timedelta(seconds=try_float(os.getenv('OCR_PROCESSING_DELAY'), 3.0))
 
-    def __init__(self, input_path, output_path, submit_func, done_callback):
+    def __init__(self, input_path, output_path, submit_func, done_callback, config_file=None):
         self.logger = logger.getChild('task')
         self.input_path = input_path
         self.output_path = output_path
         self.submit_func = submit_func
         self.done_callback = done_callback
+        self.config_file = config_file
         self.last_touch = None
         self.future = None
         self.state = OcrTask.NEW
@@ -175,7 +163,7 @@ class OcrTask(object):
         self.logger.info('Running ocrmypdf: %s', self.input_path)
 
         # TODO: Take config from ctor
-        config = OcrmypdfConfig(self.input_path, self.output_path)
+        config = OcrmypdfConfig(self.input_path, self.output_path, self.config_file)
         if not self.output_path.parent.exists():
             self.logger.debug('Mkdir: %s', self.output_path.parent)
             self.output_path.parent.mkdir()
@@ -243,9 +231,10 @@ class AutoOcrScheduler(object):
 
     OUTPUT_MODES = [SINGLE_FOLDER, MIRROR_TREE]
 
-    def __init__(self, input_dir, output_dir, output_mode):
+    def __init__(self, config_dir, input_dir, output_dir, output_mode):
         self.logger = logger.getChild('scheduler')
 
+        self.config_dir = local.path(config_dir)
         self.input_dir = local.path(input_dir)
         self.output_dir = local.path(output_dir)
         if self.input_dir == self.output_dir:
@@ -318,10 +307,25 @@ class AutoOcrScheduler(object):
                 output_path = output_path.with_suffix('.{}{}'.format(unique, output_path.suffix), depth=2)
             return output_path
 
+    def _get_config_path(self, input_path):
+        assert (input_path - self.input_dir)[0] != '..'
+        config_path = input_path.parent / 'ocr.config'
+        while True:
+            if config_path.exists():
+                return config_path
+            if config_path.parent == self.input_dir:
+                break
+            config_path = config_path.parent.parent / 'ocr.config'
+
+        config_path = self.config_dir / 'ocr.config'
+        if config_path.exists():
+            return config_path
+        return None
 
     def queue_path(self, path):
         output_path = self._map_output_path(path)
-        task = OcrTask(path, output_path, self.threadpool.submit, self.on_task_done)
+        config_file = self._get_config_path(path)
+        task = OcrTask(path, output_path, self.threadpool.submit, self.on_task_done, config_file=config_file)
         self.current_tasks[path] = task
         self.current_outputs.add(output_path)
 
@@ -360,12 +364,13 @@ if __name__ == "__main__":
 
     docker_monitor = DockerSignalMonitor()
 
+    config_dir = local.path(os.getenv('OCR_CONFIG_DIR', '/config'))
     input_dir = local.path(os.getenv('OCR_INPUT_DIR', '/input'))
     output_dir = local.path(os.getenv('OCR_OUTPUT_DIR', '/output'))
     output_mode = os.getenv('OCR_OUTPUT_MODE', AutoOcrScheduler.MIRROR_TREE)
 
     # Run an AutoOcrScheduler until terminated
-    with AutoOcrScheduler(input_dir, output_dir, output_mode) as scheduler:
+    with AutoOcrScheduler(config_dir, input_dir, output_dir, output_mode) as scheduler:
         # Wait in the main thread to be killed
         signum = docker_monitor.wait_for_exit()
         logger.warn('Signal %d (%s) Received. Shutting down...', signum, DockerSignalMonitor.SIGNUMS_TO_NAMES[signum])

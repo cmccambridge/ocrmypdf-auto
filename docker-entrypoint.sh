@@ -14,8 +14,21 @@ map_uidgid() {
     fi
 }
 
+ensure_tempdir() {
+    TARGET_DIR=${OCR_TEMP_DIR:-/temp}
+    mkdir -p "${TARGET_DIR}"
+}
+
+populate_defaults() {
+    if [[ ! -f /config/ocr.config ]]; then
+        cp /app/ocr.config /config/ocr.config
+    fi
+}
+
 initialize() {
     map_uidgid
+    ensure_tempdir
+    populate_defaults
 }
 
 if [[ "$1" != "/"* ]]; then
