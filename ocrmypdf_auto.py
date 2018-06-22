@@ -1,3 +1,4 @@
+import fnmatch
 import logging
 import os
 import sys
@@ -219,8 +220,10 @@ class AutoOcrWatchdogHandler(PatternMatchingEventHandler):
     Matches files to process through ocrmypdf and kicks off processing
     """
 
+    MATCH_PATTERNS = ['*.pdf']
+
     def __init__(self, file_touched_callback, file_deleted_callback):
-        super(AutoOcrWatchdogHandler, self).__init__(patterns = ["*.pdf"], ignore_directories=True)
+        super(AutoOcrWatchdogHandler, self).__init__(patterns = AutoOcrWatchdogHandler.MATCH_PATTERNS, ignore_directories=True)
         self.logger = logger.getChild('watchdog_handler')
         self.file_touched_callback = file_touched_callback
         self.file_deleted_callback = file_deleted_callback
@@ -261,7 +264,7 @@ class AutoOcrScheduler(object):
 
     OUTPUT_MODES = [SINGLE_FOLDER, MIRROR_TREE]
 
-    def __init__(self, config_dir, input_dir, output_dir, output_mode, delete_input_on_success=False):
+    def __init__(self, config_dir, input_dir, output_dir, output_mode, delete_input_on_success=False, process_existing_files=False):
         self.logger = logger.getChild('scheduler')
 
         self.config_dir = local.path(config_dir)
@@ -288,6 +291,10 @@ class AutoOcrScheduler(object):
         self.observer.schedule(watchdog_handler, self.input_dir, recursive=True)
         self.observer.start()
         self.logger.warn('Watching %s', self.input_dir)
+
+        # Process existing files in input directory, if requested
+        if process_existing_files:
+            self.threadpool.submit(self.walk_existing_files)
 
     def shutdown(self):
         # Shut down the feed of incoming watchdog events
@@ -364,6 +371,13 @@ class AutoOcrScheduler(object):
         self.current_tasks[path] = task
         self.current_outputs.add(output_path)
 
+    def walk_existing_files(self):
+        self.logger.debug('Enumerating existing input files...')
+        def keep_file(file):
+            return any([fnmatch.fnmatch(file, pattern) for pattern in AutoOcrWatchdogHandler.MATCH_PATTERNS])
+        for file in self.input_dir.walk(filter=keep_file):
+            self.on_file_touched(file)
+
     def on_file_touched(self, path):
         if path in self.current_tasks:
             self.current_tasks[path].touch()
@@ -404,13 +418,15 @@ if __name__ == "__main__":
     output_dir = local.path(os.getenv('OCR_OUTPUT_DIR', '/output'))
     output_mode = os.getenv('OCR_OUTPUT_MODE', AutoOcrScheduler.MIRROR_TREE)
     delete_input_on_success = (os.getenv('OCR_DELETE_INPUT_ON_SUCCESS', 'nope') == 'DELETE MY FILES')
+    process_existing_files = (os.getenv('OCR_PROCESS_EXISTING', '0').lower() in ['1', 'y', 'yes', 't', 'true', 'on'])
 
     # Run an AutoOcrScheduler until terminated
     with AutoOcrScheduler(config_dir,
                           input_dir,
                           output_dir,
                           output_mode,
-                          delete_input_on_success=delete_input_on_success) as scheduler:
+                          delete_input_on_success=delete_input_on_success,
+                          process_existing_files=process_existing_files) as scheduler:
         # Wait in the main thread to be killed
         signum = docker_monitor.wait_for_exit()
         logger.warn('Signal %d (%s) Received. Shutting down...', signum, DockerSignalMonitor.SIGNUMS_TO_NAMES[signum])
