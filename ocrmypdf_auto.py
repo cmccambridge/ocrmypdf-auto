@@ -83,13 +83,14 @@ class OcrTask(object):
 
     COALESCING_DELAY = timedelta(seconds=try_float(os.getenv('OCR_PROCESSING_DELAY'), 3.0))
 
-    def __init__(self, input_path, output_path, submit_func, done_callback, config_file=None):
+    def __init__(self, input_path, output_path, submit_func, done_callback, config_file=None, delete_input_on_success=False):
         self.logger = logger.getChild('task')
         self.input_path = input_path
         self.output_path = output_path
         self.submit_func = submit_func
         self.done_callback = done_callback
         self.config_file = config_file
+        self.delete_input_on_success = delete_input_on_success
         self.last_touch = None
         self.future = None
         self.state = OcrTask.NEW
@@ -136,6 +137,7 @@ class OcrTask(object):
             self.process()
         except BaseException as e:
             self.logger.error('Error in OcrTask.process: %s', traceback.format_exc())
+            self.done()
 
     def process(self, skip_delay=False):
         """ocrmypdf processing task"""
@@ -161,25 +163,52 @@ class OcrTask(object):
         # Actually run ocrmypdf
         self.state = OcrTask.ACTIVE
         self.last_touch = None
+        input_mtime_before = datetime.fromtimestamp(os.path.getmtime(self.input_path))
         self.logger.info('Running ocrmypdf: %s', self.input_path)
 
-        # TODO: Take config from ctor
+        # Build a command line from the provided configuration
         config = OcrmypdfConfig(self.input_path, self.output_path, self.config_file)
         if not self.output_path.parent.exists():
             self.logger.debug('Mkdir: %s', self.output_path.parent)
             self.output_path.parent.mkdir()
         ocrmypdf = OcrTask._OCRMYPDF.__getitem__(config.get_ocrmypdf_arguments()).with_env(TMPDIR=config.temp_dir)
-        (rc, stdout, stderr) = ocrmypdf.run()
-        self.logger.debug('ocrmypdf returns %d with stdout [%s] and stderr[%s]', rc, stdout, stderr)
+
+        # Execute ocrmypdf, accepting ANY return code so that we can process the return code AND outputs
+        (rc, stdout, stderr) = ocrmypdf.run(retcode=None)
+        if rc == 0:
+            self.logger.debug('ocrmypdf succeeded with stdout [%s] and stderr [%s]', stdout, stderr)
+        else:
+            self.logger.info('ocrmypdf failed with rc %d stdout [%s] and stderr [%s]', rc, stdout, stderr)
 
         runtime = datetime.now() - start_ts
-        self.logger.warn('Processing complete in %f seconds: %s', round(runtime.total_seconds(), 2), self.input_path)
+        self.logger.warn('Processing complete in %f seconds with status %d: %s', round(runtime.total_seconds(), 2), rc, self.input_path)
 
         # Check for modification during sleep
         if self.last_touch is not None:
             self.logger.info('Modified during ocrmypdf execution: [%s] %s', self.state, self.input_path)
             self.enqueue()
             return
+
+        # Delete input file on success, if so configured
+        if rc == 0 and self.delete_input_on_success:
+            output_mtime = datetime.fromtimestamp(os.path.getmtime(self.output_path))
+            input_mtime_after = datetime.fromtimestamp(os.path.getmtime(self.input_path))
+            # Sanity tests to avoid deleting on some kind of failed job or when the input
+            # has changed during processing:
+            # 1. Input file's modification time MUST be identical to that captured at job start
+            # 2. Output file's modification time MUST be more recent than the input file's
+            #    modification time captured at job start
+            if output_mtime < input_mtime_before:
+                self.logger.warn('Not deleting input file. Output file %s was modified earlier [%s] than input file %s was modified [%s]',
+                                 self.output_path, output_mtime,
+                                 self.input_path, input_mtime_before)
+            elif input_mtime_after != input_mtime_before:
+                self.logger.warn('Not deleting input file. Input file %s modification time after OCR task [%s] is not equal to before task [%s]',
+                                 self.input_path,
+                                 input_mtime_after, input_mtime_before)
+            else:
+                self.input_path.delete()
+                self.logger.debug('Deleted input file after successful OCR: %s', self.input_path)
 
         # We're done
         self.done()
@@ -232,7 +261,7 @@ class AutoOcrScheduler(object):
 
     OUTPUT_MODES = [SINGLE_FOLDER, MIRROR_TREE]
 
-    def __init__(self, config_dir, input_dir, output_dir, output_mode):
+    def __init__(self, config_dir, input_dir, output_dir, output_mode, delete_input_on_success=False):
         self.logger = logger.getChild('scheduler')
 
         self.config_dir = local.path(config_dir)
@@ -240,10 +269,10 @@ class AutoOcrScheduler(object):
         self.output_dir = local.path(output_dir)
         if self.input_dir == self.output_dir:
             raise AutoOcrSchedulerException('Invalid configuration. Input and output directories must not be the same to avoid recursive OCR invocation!')
-
         self.output_mode = output_mode.lower()
         if self.output_mode not in AutoOcrScheduler.OUTPUT_MODES:
             raise AutoOcrSchedulerException('Invalid output mode: {}. Must be one of: {}'.format(self.output_mode, ','.join(AutoOcrScheduler.OUTPUT_MODES)))
+        self.delete_input_on_success = delete_input_on_success
 
         self.current_tasks = {}
         self.current_outputs = set()
@@ -326,7 +355,12 @@ class AutoOcrScheduler(object):
     def queue_path(self, path):
         output_path = self._map_output_path(path)
         config_file = self._get_config_path(path)
-        task = OcrTask(path, output_path, self.threadpool.submit, self.on_task_done, config_file=config_file)
+        task = OcrTask(path,
+                       output_path,
+                       self.threadpool.submit,
+                       self.on_task_done,
+                       config_file=config_file,
+                       delete_input_on_success=self.delete_input_on_success)
         self.current_tasks[path] = task
         self.current_outputs.add(output_path)
 
@@ -369,9 +403,14 @@ if __name__ == "__main__":
     input_dir = local.path(os.getenv('OCR_INPUT_DIR', '/input'))
     output_dir = local.path(os.getenv('OCR_OUTPUT_DIR', '/output'))
     output_mode = os.getenv('OCR_OUTPUT_MODE', AutoOcrScheduler.MIRROR_TREE)
+    delete_input_on_success = (os.getenv('OCR_DELETE_INPUT_ON_SUCCESS', 'nope') == 'DELETE MY FILES')
 
     # Run an AutoOcrScheduler until terminated
-    with AutoOcrScheduler(config_dir, input_dir, output_dir, output_mode) as scheduler:
+    with AutoOcrScheduler(config_dir,
+                          input_dir,
+                          output_dir,
+                          output_mode,
+                          delete_input_on_success=delete_input_on_success) as scheduler:
         # Wait in the main thread to be killed
         signum = docker_monitor.wait_for_exit()
         logger.warn('Signal %d (%s) Received. Shutting down...', signum, DockerSignalMonitor.SIGNUMS_TO_NAMES[signum])
