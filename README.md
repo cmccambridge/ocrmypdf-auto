@@ -117,6 +117,7 @@ For example, in this `/input` Volume hierarchy:
 ```
 
 The following `ocr.config` file selections would be made:
+
 |PDF file|`ocr.config` file|Notes|
 |---|---|---|
 |`/input/foo/bar/bar.pdf`|`/input/foo/bar/ocr.config`|Same directory as `bar.pdf`|
