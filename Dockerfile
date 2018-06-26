@@ -36,7 +36,7 @@ RUN groupadd -g 1000 docker && \
     chown -Rh docker:docker /app && \
     chmod 755 /app/docker-entrypoint.sh
 
-VOLUME ["/config", "/input", "/output", "/ocrtemp"]
+VOLUME ["/config", "/input", "/output", "/ocrtemp", "/archive"]
 
 ENTRYPOINT ["/app/docker-entrypoint.sh"]
 

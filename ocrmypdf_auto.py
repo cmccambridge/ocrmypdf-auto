@@ -22,10 +22,11 @@ class OcrmypdfConfigParsingError(AutoOcrError):
 
 class OcrmypdfConfig(object):
 
-    def __init__(self, input_path, output_path, config_file=None):
+    def __init__(self, input_path, output_path, archive_path, config_file=None):
         self.logger = logger.getChild('config')
         self.input_path = local.path(input_path)
         self.output_path = local.path(output_path)
+        self.archive_path = local.path(archive_path)
         temp_dir = os.getenv('OCR_TEMP_DIR', '/ocrtemp')
         self.temp_dir = local.path(temp_dir) if temp_dir else None
         self.options = {}
@@ -75,6 +76,9 @@ def try_float(string, default_value):
     except (ValueError, TypeError):
         return default_value
 
+class OcrTaskError(AutoOcrError):
+    pass
+
 class OcrTask(object):
 
     NEW = 'NEW'
@@ -83,18 +87,28 @@ class OcrTask(object):
     ACTIVE = 'ACTIVE'
     DONE = 'DONE'
 
+    ON_SUCCESS_DO_NOTHING = 'nothing'
+    ON_SUCCESS_DELETE_INPUT = 'delete_input_files'
+    ON_SUCCESS_ARCHIVE = 'archive_input_files'
+    SUCCESS_ACTIONS = [ON_SUCCESS_DO_NOTHING, ON_SUCCESS_DELETE_INPUT, ON_SUCCESS_ARCHIVE]
+
     _OCRMYPDF = local['ocrmypdf']
 
     COALESCING_DELAY = timedelta(seconds=try_float(os.getenv('OCR_PROCESSING_DELAY'), 3.0))
 
-    def __init__(self, input_path, output_path, submit_func, done_callback, config_file=None, delete_input_on_success=False):
+    def __init__(self, input_path, output_path, submit_func, done_callback, config_file=None, success_action=ON_SUCCESS_DO_NOTHING, archive_path=None):
         self.logger = logger.getChild('task')
         self.input_path = input_path
         self.output_path = output_path
         self.submit_func = submit_func
         self.done_callback = done_callback
         self.config_file = config_file
-        self.delete_input_on_success = delete_input_on_success
+        self.success_action = success_action
+        if self.success_action not in OcrTask.SUCCESS_ACTIONS:
+            raise OcrTaskError('Invalid success action: {}. Must be one of {}'.format(self.success_action, ', '.join(OcrTask.SUCCESS_ACTIONS)))
+        self.archive_path = archive_path
+        if self.success_action == OcrTask.ON_SUCCESS_ARCHIVE and not self.archive_path:
+            raise OcrTaskError('Archive path required for success action {}'.format(self.success_action))
         self.last_touch = None
         self.future = None
         self.state = OcrTask.NEW
@@ -193,26 +207,36 @@ class OcrTask(object):
             self.enqueue()
             return
 
-        # Delete input file on success, if so configured
-        if rc == 0 and self.delete_input_on_success:
+        # Perform success action as configured, unless file was modified since OCR
+        if rc == 0 and self.success_action in [OcrTask.ON_SUCCESS_DELETE_INPUT, OcrTask.ON_SUCCESS_ARCHIVE]:
             output_mtime = datetime.fromtimestamp(os.path.getmtime(self.output_path))
             input_mtime_after = datetime.fromtimestamp(os.path.getmtime(self.input_path))
-            # Sanity tests to avoid deleting on some kind of failed job or when the input
-            # has changed during processing:
+
+            # Sanity tests to avoid deleting or archiving on some kind of failed job or when
+            # the input has changed during processing:
             # 1. Input file's modification time MUST be identical to that captured at job start
             # 2. Output file's modification time MUST be more recent than the input file's
             #    modification time captured at job start
             if output_mtime < input_mtime_before:
-                self.logger.warn('Not deleting input file. Output file %s was modified earlier [%s] than input file %s was modified [%s]',
+                self.logger.warn('Not %s input file. Output file %s was modified earlier [%s] than input file %s was modified [%s]',
+                                 'deleting' if self.success_action == OcrTask.ON_SUCCESS_DELETE_INPUT else 'archiving',
                                  self.output_path, output_mtime,
                                  self.input_path, input_mtime_before)
             elif input_mtime_after != input_mtime_before:
-                self.logger.warn('Not deleting input file. Input file %s modification time after OCR task [%s] is not equal to before task [%s]',
+                self.logger.warn('Not %s input file. Input file %s modification time after OCR task [%s] is not equal to before task [%s]',
+                                 'deleting' if self.success_action == OcrTask.ON_SUCCESS_DELETE_INPUT else 'archiving',
                                  self.input_path,
                                  input_mtime_after, input_mtime_before)
             else:
-                self.input_path.delete()
-                self.logger.debug('Deleted input file after successful OCR: %s', self.input_path)
+                if self.success_action == OcrTask.ON_SUCCESS_DELETE_INPUT:
+                    self.input_path.delete()
+                    self.logger.debug('Deleted input file after successful OCR: %s', self.input_path)
+                else:
+                    if not self.archive_path.parent.exists():
+                        self.logger.debug('Mkdir: %s', self.archive_path.parent)
+                        self.archive_path.parent.mkdir()
+                    self.input_path.move(self.archive_path)
+                    self.logger.debug('Archived input file after successful OCR: %s -> %s', self.input_path, self.archive_path)
 
         # We're done
         self.done()
@@ -267,7 +291,7 @@ class AutoOcrScheduler(object):
 
     OUTPUT_MODES = [SINGLE_FOLDER, MIRROR_TREE]
 
-    def __init__(self, config_dir, input_dir, output_dir, output_mode, delete_input_on_success=False, process_existing_files=False):
+    def __init__(self, config_dir, input_dir, output_dir, output_mode, success_action=OcrTask.ON_SUCCESS_DO_NOTHING, archive_dir=None, process_existing_files=False):
         self.logger = logger.getChild('scheduler')
 
         self.config_dir = local.path(config_dir)
@@ -278,7 +302,12 @@ class AutoOcrScheduler(object):
         self.output_mode = output_mode.lower()
         if self.output_mode not in AutoOcrScheduler.OUTPUT_MODES:
             raise AutoOcrSchedulerError('Invalid output mode: {}. Must be one of: {}'.format(self.output_mode, ', '.join(AutoOcrScheduler.OUTPUT_MODES)))
-        self.delete_input_on_success = delete_input_on_success
+        self.success_action = success_action.lower()
+        if self.success_action not in OcrTask.SUCCESS_ACTIONS:
+            raise AutoOcrSchedulerError('Invalid success action: {}. Must be one of {}'.format(self.success_action, ', '.join(OcrTask.SUCCESS_ACTIONS)))
+        self.archive_dir = local.path(archive_dir) if archive_dir else None
+        if self.success_action == OcrTask.ON_SUCCESS_ARCHIVE and not self.archive_dir:
+            raise AutoOcrSchedulerError('Archive directory required for success action {}'.format(self.success_action))
 
         self.current_tasks = {}
         self.current_outputs = set()
@@ -347,6 +376,9 @@ class AutoOcrScheduler(object):
                 output_path = output_path.with_suffix('.{}{}'.format(unique, output_path.suffix), depth=2)
             return output_path
 
+    def _map_archive_path(self, input_path):
+        return self.archive_dir / (input_path - self.input_dir)
+
     def _get_config_path(self, input_path):
         assert (input_path - self.input_dir)[0] != '..'
         config_path = input_path.parent / 'ocr.config'
@@ -365,12 +397,14 @@ class AutoOcrScheduler(object):
     def queue_path(self, path):
         output_path = self._map_output_path(path)
         config_file = self._get_config_path(path)
+        archive_file = self._map_archive_path(path)
         task = OcrTask(path,
                        output_path,
                        self.threadpool.submit,
                        self.on_task_done,
                        config_file=config_file,
-                       delete_input_on_success=self.delete_input_on_success)
+                       success_action=self.success_action,
+                       archive_path=archive_file)
         self.current_tasks[path] = task
         self.current_outputs.add(output_path)
 
@@ -420,7 +454,8 @@ if __name__ == "__main__":
     input_dir = local.path(os.getenv('OCR_INPUT_DIR', '/input'))
     output_dir = local.path(os.getenv('OCR_OUTPUT_DIR', '/output'))
     output_mode = os.getenv('OCR_OUTPUT_MODE', AutoOcrScheduler.MIRROR_TREE)
-    delete_input_on_success = (os.getenv('OCR_DELETE_INPUT_ON_SUCCESS', 'nope') == 'DELETE MY FILES')
+    action_on_success = (os.getenv('OCR_ACTION_ON_SUCCESS', OcrTask.ON_SUCCESS_DO_NOTHING))
+    archive_dir = local.path(os.getenv('OCR_ARCHIVE_DIR', '/archive'))
     process_existing_files = (os.getenv('OCR_PROCESS_EXISTING', '0').lower() in ['1', 'y', 'yes', 't', 'true', 'on'])
 
     # Run an AutoOcrScheduler until terminated
@@ -428,7 +463,8 @@ if __name__ == "__main__":
                           input_dir,
                           output_dir,
                           output_mode,
-                          delete_input_on_success=delete_input_on_success,
+                          success_action=action_on_success,
+                          archive_dir=archive_dir,
                           process_existing_files=process_existing_files) as scheduler:
         # Wait in the main thread to be killed
         signum = docker_monitor.wait_for_exit()
