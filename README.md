@@ -25,7 +25,7 @@ docker create \
   -v <appdata/config directory>:/config \
   -v <temp directory>:/ocrtemp \
   -v <archvie directory>:/archive \
-  -e OCR_OUTPUT_MODE=MIRROR_FOLDERS \
+  -e OCR_OUTPUT_MODE=MIRROR_TREE \
   -e OCR_PROCESS_EXISTING_ON_START=1 \
   -e OCR_ACTION_ON_SUCCESS=ARCHIVE_INPUT_FILES \
   cmccambridge/ocrmypdf-auto
@@ -46,6 +46,7 @@ A few volumes are required for normal operation of `ocrmypdf-auto`:
 ## Optional Volumes
 
 A few additional volumes may be mounted for advanced configuration:
+
 |Volume|Description|
 |---|---|
 |`/ocrtemp`|Directory to use for all OCRmyPDF temporary files, e.g. to select a ramdisk or a local cache|
@@ -57,7 +58,7 @@ A few additional volumes may be mounted for advanced configuration:
 
 |Environment Variable|Description|
 |---|---|
-|`OCR_OUTPUT_MODE` | Controls the output directory layout: <br /> `MIRROR_FOLDERS` - (Default) Mirror the directory structure of the input directory, i.e. for an input file `/input/foo/bar.pdf` create an output file `/output/foo/bar.pdf`. <br /> `SINGLE_FOLDER` - Collect all output files in a single flat folder, i.e. for an input file `/input/foo/bar.pdf` create an output file `/output/bar.pdf`.|
+|`OCR_OUTPUT_MODE` | Controls the output directory layout: <br /> `MIRROR_TREE` - (Default) Mirror the directory structure of the input directory, i.e. for an input file `/input/foo/bar.pdf` create an output file `/output/foo/bar.pdf`. <br /> `SINGLE_FOLDER` - Collect all output files in a single flat folder, i.e. for an input file `/input/foo/bar.pdf` create an output file `/output/bar.pdf`.|
 |`OCR_PROCESS_EXISTING_ON_START` | Set to `1` to enable processing of any files in the input directory when the container is launched. <br/> Set to `0` (Default) or unset to ignore existing files until they are modified.|
 |`OCR_ACTION_ON_SUCCESS` | Controls the action (if any) to perform after successful OCR processing: <br /> `NOTHING` - (Default) Do nothing. Input files remain in place where they were found. <br /> `ARCHIVE_INPUT_FILES` - Archive input files by **moving** them (overwriting existing files!) to the `/archive` Volume <br /> `DELETE_INPUT_FILES` - Delete the input file after successful processing.|
 |`OCR_VERBOSITY` | Control the verbosity of debug logging. Accepts python `logging` levels, e.g. `warn` (Default), `info`, `debug`, etc.|
@@ -100,6 +101,7 @@ To support flexible configuration of OCRmyPDF from a single container, `ocrmypdf
 Note that only a _single_ `ocr.config` file is used for a given OCRmyPDF invocation, so all desired command-line options must be specified in the corresponding configuration file. (There is no mechanism to "override" configuration from parent directories.)
 
 For example, in this `/input` Volume hierarchy:
+
 ```
 /input
 ├── foo
