@@ -14,7 +14,10 @@ from docker_support import DockerSignalMonitor
 
 logger = logging.getLogger('ocrmypdf-auto')
 
-class OcrmypdfConfigParsingError(Exception):
+class AutoOcrError(Exception):
+    pass
+
+class OcrmypdfConfigParsingError(AutoOcrError):
     pass
 
 class OcrmypdfConfig(object):
@@ -23,7 +26,7 @@ class OcrmypdfConfig(object):
         self.logger = logger.getChild('config')
         self.input_path = local.path(input_path)
         self.output_path = local.path(output_path)
-        temp_dir = os.getenv('OCR_TEMP_DIR')
+        temp_dir = os.getenv('OCR_TEMP_DIR', '/ocrtemp')
         self.temp_dir = local.path(temp_dir) if temp_dir else None
         self.options = {}
         self.set_default_options()
@@ -254,7 +257,7 @@ class AutoOcrWatchdogHandler(PatternMatchingEventHandler):
         self.touch_file(local.path(event.src_path))
 
 
-class AutoOcrSchedulerException(Exception):
+class AutoOcrSchedulerError(AutoOcrError):
     pass
 
 class AutoOcrScheduler(object):
@@ -271,10 +274,10 @@ class AutoOcrScheduler(object):
         self.input_dir = local.path(input_dir)
         self.output_dir = local.path(output_dir)
         if self.input_dir == self.output_dir:
-            raise AutoOcrSchedulerException('Invalid configuration. Input and output directories must not be the same to avoid recursive OCR invocation!')
+            raise AutoOcrSchedulerError('Invalid configuration. Input and output directories must not be the same to avoid recursive OCR invocation!')
         self.output_mode = output_mode.lower()
         if self.output_mode not in AutoOcrScheduler.OUTPUT_MODES:
-            raise AutoOcrSchedulerException('Invalid output mode: {}. Must be one of: {}'.format(self.output_mode, ','.join(AutoOcrScheduler.OUTPUT_MODES)))
+            raise AutoOcrSchedulerError('Invalid output mode: {}. Must be one of: {}'.format(self.output_mode, ', '.join(AutoOcrScheduler.OUTPUT_MODES)))
         self.delete_input_on_success = delete_input_on_success
 
         self.current_tasks = {}
