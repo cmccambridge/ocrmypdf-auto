@@ -22,6 +22,8 @@ class OcrmypdfConfigParsingError(AutoOcrError):
 
 class OcrmypdfConfig(object):
 
+    _OCRMYPDF = local['ocrmypdf']
+
     def __init__(self, input_path, output_path, archive_path, config_file=None):
         self.logger = logger.getChild('config')
         self.input_path = local.path(input_path)
@@ -70,6 +72,10 @@ class OcrmypdfConfig(object):
         args.append(self.output_path)
         return args
 
+    def get_ocrmypdf_command(self):
+        return OcrmypdfConfig._OCRMYPDF.__getitem__(self.get_ocrmypdf_arguments()).with_env(temp_dir=self.temp_dir)
+
+
 def try_float(string, default_value):
     try:
         return float(string)
@@ -91,8 +97,6 @@ class OcrTask(object):
     ON_SUCCESS_DELETE_INPUT = 'delete_input_files'
     ON_SUCCESS_ARCHIVE = 'archive_input_files'
     SUCCESS_ACTIONS = [ON_SUCCESS_DO_NOTHING, ON_SUCCESS_DELETE_INPUT, ON_SUCCESS_ARCHIVE]
-
-    _OCRMYPDF = local['ocrmypdf']
 
     COALESCING_DELAY = timedelta(seconds=try_float(os.getenv('OCR_PROCESSING_DELAY'), 3.0))
 
@@ -158,7 +162,7 @@ class OcrTask(object):
             self.done()
 
     def process(self, skip_delay=False):
-        """ocrmypdf processing task"""
+        """OCR processing task"""
         self.logger.warn('Processing: %s -> %s', self.input_path, self.output_path)
         start_ts = datetime.now()
 
@@ -178,32 +182,33 @@ class OcrTask(object):
             self.state = OcrTask.SLEEPING
             time.sleep(wait_span.total_seconds())
 
-        # Actually run ocrmypdf
+        # Enter the active state and capture the last modified timestamp of the input file to
+        # validate when OCR is completed
         self.state = OcrTask.ACTIVE
         self.last_touch = None
         input_mtime_before = datetime.fromtimestamp(os.path.getmtime(self.input_path))
-        self.logger.info('Running ocrmypdf: %s', self.input_path)
+        self.logger.info('Running OCRmyPDF: %s', self.input_path)
 
         # Build a command line from the provided configuration
         config = OcrmypdfConfig(self.input_path, self.output_path, self.config_file)
         if not self.output_path.parent.exists():
             self.logger.debug('Mkdir: %s', self.output_path.parent)
             self.output_path.parent.mkdir()
-        ocrmypdf = OcrTask._OCRMYPDF.__getitem__(config.get_ocrmypdf_arguments()).with_env(TMPDIR=config.temp_dir)
+        ocrmypdf = config.get_ocrmypdf_command()
 
         # Execute ocrmypdf, accepting ANY return code so that we can process the return code AND outputs
         (rc, stdout, stderr) = ocrmypdf.run(retcode=None)
         if rc == 0:
-            self.logger.debug('ocrmypdf succeeded with stdout [%s] and stderr [%s]', stdout, stderr)
+            self.logger.debug('OCRmyPDF succeeded with stdout [%s] and stderr [%s]', stdout, stderr)
         else:
-            self.logger.info('ocrmypdf failed with rc %d stdout [%s] and stderr [%s]', rc, stdout, stderr)
+            self.logger.info('OCRmyPDF failed with rc %d stdout [%s] and stderr [%s]', rc, stdout, stderr)
 
         runtime = datetime.now() - start_ts
         self.logger.warn('Processing complete in %f seconds with status %d: %s', round(runtime.total_seconds(), 2), rc, self.input_path)
 
         # Check for modification during sleep
         if self.last_touch is not None:
-            self.logger.info('Modified during ocrmypdf execution: [%s] %s', self.state, self.input_path)
+            self.logger.info('Modified during OCR execution: [%s] %s', self.state, self.input_path)
             self.enqueue()
             return
 
@@ -244,7 +249,7 @@ class OcrTask(object):
 
 class AutoOcrWatchdogHandler(PatternMatchingEventHandler):
     """
-    Matches files to process through ocrmypdf and kicks off processing
+    Matches files to process through OCR and kicks off processing
     """
 
     MATCH_PATTERNS = ['*.pdf']

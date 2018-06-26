@@ -5,7 +5,7 @@
     <SchemaVersion>2.0</SchemaVersion>
     <ProjectGuid>{476c93ba-2232-46b4-b555-53f76b6b172d}</ProjectGuid>
     <ProjectHome />
-    <StartupFile>ocrmypdf_auto.py</StartupFile>
+    <StartupFile>ocrmypdf-auto.py</StartupFile>
     <SearchPath />
     <WorkingDirectory>.</WorkingDirectory>
     <OutputPath>.</OutputPath>
@@ -22,10 +22,10 @@
     <Content Include="requirements.txt" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="ocrmypdf-auto.py" />
     <Compile Include="docker_support.py">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="ocrmypdf_auto.py" />
   </ItemGroup>
   <ItemGroup>
     <InterpreterReference Include="Global|PythonCore|3.6" />
