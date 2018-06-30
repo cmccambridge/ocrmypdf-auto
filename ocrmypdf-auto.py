@@ -67,6 +67,7 @@ class OcrmypdfConfig(object):
             args.append(arg)
             if val is not None:
                 args.append(val)
+        args.append('--')
         args.append(self.input_path)
         args.append(self.output_path)
         return args
