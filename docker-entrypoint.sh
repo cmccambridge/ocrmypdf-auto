@@ -22,6 +22,7 @@ ensure_tempdir() {
 populate_defaults() {
     if [[ ! -f /config/ocr.config ]]; then
         cp /app/ocr.config /config/ocr.config
+        chown docker:docker /config/ocr.config
     fi
 }
 

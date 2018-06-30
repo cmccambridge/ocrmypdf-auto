@@ -24,11 +24,10 @@ class OcrmypdfConfig(object):
 
     _OCRMYPDF = local['ocrmypdf']
 
-    def __init__(self, input_path, output_path, archive_path, config_file=None):
+    def __init__(self, input_path, output_path, config_file=None):
         self.logger = logger.getChild('config')
         self.input_path = local.path(input_path)
         self.output_path = local.path(output_path)
-        self.archive_path = local.path(archive_path)
         temp_dir = os.getenv('OCR_TEMP_DIR', '/ocrtemp')
         self.temp_dir = local.path(temp_dir) if temp_dir else None
         self.options = {}
@@ -122,12 +121,11 @@ class OcrTask(object):
         return self.__repr__()
 
     def __repr__(self):
-        return "<OcrTask [{}] {}->{} last_touch={} future={}>".format(
+        return "<OcrTask [{}] {}->{} last_touch={}>".format(
                 self.state,
                 self.input_path,
                 self.output_path,
-                self.last_touch,
-                self.future)
+                self.last_touch)
 
     def enqueue(self):
         assert self.state in [OcrTask.NEW, OcrTask.ACTIVE]
@@ -187,7 +185,7 @@ class OcrTask(object):
         self.state = OcrTask.ACTIVE
         self.last_touch = None
         input_mtime_before = datetime.fromtimestamp(os.path.getmtime(self.input_path))
-        self.logger.info('Running OCRmyPDF: %s', self.input_path)
+        self.logger.info('Running OCRmyPDF: %s with config file: %s', self.input_path, self.config_file)
 
         # Build a command line from the provided configuration
         config = OcrmypdfConfig(self.input_path, self.output_path, self.config_file)
