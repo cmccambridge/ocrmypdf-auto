@@ -1,6 +1,8 @@
 #!/bin/bash
 set -e
 
+umask 000
+
 # Source: https://github.com/danielquinn/paperless/
 map_uidgid() {
     USERMAP_ORIG_UID=$(id -u docker)
