@@ -14,7 +14,7 @@ docker create \
   -v <input directory>:/input \
   -v <output directory>:/output \
   -v <appdata/config directory>:/config \
-  cmccambridge/ocrmypdf-auto
+  quay.io/cmccambridge/ocrmypdf-auto
 ```
 
 Full Custom:
@@ -28,7 +28,7 @@ docker create \
   -e OCR_OUTPUT_MODE=MIRROR_TREE \
   -e OCR_PROCESS_EXISTING_ON_START=1 \
   -e OCR_ACTION_ON_SUCCESS=ARCHIVE_INPUT_FILES \
-  cmccambridge/ocrmypdf-auto
+  quay.io/cmccambridge/ocrmypdf-auto
 ```
 
 ## Volumes
