@@ -1,10 +1,17 @@
-﻿[ocrmypdfurl]: https://github.com/jbarlow83/OCRmyPDF
-
 # cmccambridge/ocrmypdf-auto
 
-This container monitors an input file directory for PDF documents to process, and automatically invokes [`OCRmyPDF`][ocrmypdfurl] on each file.
+This container monitors an input file directory for PDF documents to process, and automatically invokes [`OCRmyPDF`][ocrmypdf] on each file.
 
 It uses `inotify` to monitor the input directory efficiently, and is fairly configurable.
+
+* [Usage](#usage)
+* [Volumes](#volumes)
+* [Environment Variables](#environment-variables-and-global-configuration)
+* [`OCRmyPDF` Configuration Files](#ocrmypdf-configuration-files)
+* [unRAID Integration](#unraid-integration)
+* [Future Work](#future-work)
+
+[ocrmypdf]: https://github.com/jbarlow83/OCRmyPDF
 
 ## Usage
 
@@ -128,8 +135,38 @@ The following `ocr.config` file selections would be made:
 |`/input/qux.pdf`|`/config/ocr.config`|No config file exists in this directory, which is the `/input` Volume root|
 |`/input/quux/quuux/quuuux.pdf`|`/config/ocr.config`|No config file in the same directory nor any parent all the way to the `/input` Volume root|
 
-### TODO
+## unRAID Integration
 
-* Create unRAID community application template
-* Add automatic OCR language pack installation (via tesseract language packages)
-* Build an Alpine-based image for size reduction (requires tesseract v4 to be supported in Alpine for best quality results)
+If you're an [unRAID][unraid] user, you may want to install ocrmypdf-auto through [Community Applications][ca] instead of directly installing this Docker image. The unRAID template will set some default settings that integrate well with unRAID (see below), as well as the latest updates if the container template itself changes over time.
+
+### unRAID-specific Recommended Settings
+
+Notes:
+* _I'm using unRAID terminology_ `path` _and_ `variable` _here, for clarity, in place of Docker terminology_ `volume` _and_ `environment variable`.
+* _You can also review these settings in the [ocrmypdf-auto template][template] itself_
+
+|Type|Setting|Value|Notes|
+|----|-------|-----|-----|
+|Path|`/config`|`/mnt/user/appdata/ocrmypdf-auto`|Store configuration files (ocr.config) in standard unRAID appdata location|
+|Variable|`OCR_OUTPUT_MODE`|`MIRROR_TREE`|Organizes a tree of output files that mirrors the input files. This is a good, non-surprising default for running as a NAS service.|
+|Variable|`OCR_ACTION_ON_SUCCESS`|`NOTHING`|By default, don't touch the input files after processing. This is a **safe** default for running as a NAS service, but **Note:** you may wish to customize this behavior once you're comfortable with ocrmypdf-auto operations!|
+|Variable|`OCR_PROCESS_EXISTING_ON_START`|`0`|Corresponding with the `OCR_ACTION_ON_SUCCESS`, we explicitly disable processing existing files on startup to avoid reprocessing all files every time the container is updated or unRAID is rebooted.|
+|Variable|`USERMAP_UID`|`99`|This is the UID of unRAID's `nobody` user. You should use this value unless you really know what you're doing!|
+|Variable|`USERMAP_GID`|`100`|This is the GID of unRAID's `users` group. You should use this value unless you really know what you're doing!|
+
+
+[unraid]: https://lime-technology.com/
+[ca]: https://lime-technology.com/forums/topic/38582-plug-in-community-applications/
+[template]: https://github.com/cmccambridge/unraid-templates/blob/master/cmccambridge/ocrmypdf-auto.xml
+
+## Future Work
+
+Some specific future work items I have planned:
+* [#2][i2] Add automatic OCR language pack installation (via tesseract language packages) 
+* [#3][i3] Build an Alpine-based image for size reduction (requires tesseract v4 to be supported in Alpine for best quality results)
+
+Please also see the [GitHub Issues][issues], where you can report any problems or make any feature requests as well!
+
+[i2]: https://github.com/cmccambridge/ocrmypdf-auto/issues/2
+[i3]: https://github.com/cmccambridge/ocrmypdf-auto/issues/3
+[issues]: https://github.com/cmccambridge/ocrmypdf-auto/issues/
