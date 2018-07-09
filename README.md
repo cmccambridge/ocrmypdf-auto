@@ -1,4 +1,7 @@
+![ocrmypdf-auto logo](https://raw.githubusercontent.com/cmccambridge/ocrmypdf-auto/master/media/logo.png)
+
 # cmccambridge/ocrmypdf-auto
+[![Docker Repository on Quay](https://quay.io/repository/cmccambridge/ocrmypdf-auto/status "Docker Repository on Quay")](https://quay.io/repository/cmccambridge/ocrmypdf-auto)
 
 This container monitors an input file directory for PDF documents to process, and automatically invokes [`OCRmyPDF`][ocrmypdf] on each file.
 
