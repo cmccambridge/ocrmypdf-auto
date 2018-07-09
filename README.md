@@ -3,9 +3,11 @@
 # cmccambridge/ocrmypdf-auto
 [![Docker Repository on Quay](https://quay.io/repository/cmccambridge/ocrmypdf-auto/status "Docker Repository on Quay")](https://quay.io/repository/cmccambridge/ocrmypdf-auto)
 
-This container monitors an input file directory for PDF documents to process, and automatically invokes [`OCRmyPDF`][ocrmypdf] on each file.
+This container automates one stage in a "paperless" document processing pipeline: Take all the PDFs in a folder, run OCR on them, and save the output to another folder. It combines the excellent tools [OCRmyPDF][ocrmypdf] and [tesseract-ocr][tesseract] with `inotify`-based file monitoring and some new configurability.
 
-It uses `inotify` to monitor the input directory efficiently, and is fairly configurable.
+For example, you could configure a wireless document scanner to save all images to one volume, and use this container to monitor all new incoming files, OCR them, and write the finished (searchable!) PDFs to another volume.
+
+![ocrmypdf-auto workflow. Scan to input volume, ocrmypdf-auto runs, collect results in output volume](https://raw.githubusercontent.com/cmccambridge/ocrmypdf-auto/master/media/flow.png)
 
 * [Usage](#usage)
 * [Volumes](#volumes)
@@ -15,6 +17,7 @@ It uses `inotify` to monitor the input directory efficiently, and is fairly conf
 * [Future Work](#future-work)
 
 [ocrmypdf]: https://github.com/jbarlow83/OCRmyPDF
+[tesseract]: https://github.com/tesseract-ocr/tesseract
 
 ## Usage
 
@@ -173,3 +176,13 @@ Please also see the [GitHub Issues][issues], where you can report any problems o
 [i2]: https://github.com/cmccambridge/ocrmypdf-auto/issues/2
 [i3]: https://github.com/cmccambridge/ocrmypdf-auto/issues/3
 [issues]: https://github.com/cmccambridge/ocrmypdf-auto/issues/
+
+## Credits
+
+Additional credits for icons in the flow chart:
+* Icon made by [Freepik][cr-freepik] from [www.flaticon.com][cr-flaticon]
+* Icon made by [Smashicons][cr-smashicons] from [www.flaticon.com][cr-flaticon]
+
+[cr-freepik]: https://www.freepik.com
+[cr-smashicons]: https://smashicons.com
+[cr-flaticon]: https://www.flaticon.com
