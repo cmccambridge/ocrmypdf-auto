@@ -460,7 +460,7 @@ if __name__ == "__main__":
     output_mode = os.getenv('OCR_OUTPUT_MODE', AutoOcrScheduler.MIRROR_TREE)
     action_on_success = (os.getenv('OCR_ACTION_ON_SUCCESS', OcrTask.ON_SUCCESS_DO_NOTHING))
     archive_dir = local.path(os.getenv('OCR_ARCHIVE_DIR', '/archive'))
-    process_existing_files = (os.getenv('OCR_PROCESS_EXISTING', '0').lower() in ['1', 'y', 'yes', 't', 'true', 'on'])
+    process_existing_files = (os.getenv('OCR_PROCESS_EXISTING_ON_START', '0').lower() in ['1', 'y', 'yes', 't', 'true', 'on'])
 
     # Run an AutoOcrScheduler until terminated
     with AutoOcrScheduler(config_dir,
