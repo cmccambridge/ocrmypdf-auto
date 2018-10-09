@@ -41,6 +41,7 @@ docker create \
   -e OCR_OUTPUT_MODE=MIRROR_TREE \
   -e OCR_PROCESS_EXISTING_ON_START=1 \
   -e OCR_ACTION_ON_SUCCESS=ARCHIVE_INPUT_FILES \
+  -e OCR_NOTIFY_URL=http://server.local/path \
   quay.io/cmccambridge/ocrmypdf-auto
 ```
 
@@ -74,6 +75,7 @@ A few additional volumes may be mounted for advanced configuration:
 |`OCR_OUTPUT_MODE` | Controls the output directory layout: <br /> `MIRROR_TREE` - (Default) Mirror the directory structure of the input directory, i.e. for an input file `/input/foo/bar.pdf` create an output file `/output/foo/bar.pdf`. <br /> `SINGLE_FOLDER` - Collect all output files in a single flat folder, i.e. for an input file `/input/foo/bar.pdf` create an output file `/output/bar.pdf`.|
 |`OCR_PROCESS_EXISTING_ON_START` | Set to `1` to enable processing of any files in the input directory when the container is launched. <br/> Set to `0` (Default) or unset to ignore existing files until they are modified.|
 |`OCR_ACTION_ON_SUCCESS` | Controls the action (if any) to perform after successful OCR processing: <br /> `NOTHING` - (Default) Do nothing. Input files remain in place where they were found. <br /> `ARCHIVE_INPUT_FILES` - Archive input files by **moving** them (overwriting existing files!) to the `/archive` Volume <br /> `DELETE_INPUT_FILES` - Delete the input file after successful processing.|
+|`OCR_NOTIFY_URL` | On a successful completion, a POST will be made to the given URL, with a JSON payload of `{'pdf': '/output/doc.pdf', 'txt': '/output/doc.pdf.txt'}`. The txt property will only be present if you add the `--sidecar` option to the ocr.config file. This could be used to kick off additional processing, like indexing of the content or notifications. |
 |`OCR_VERBOSITY` | Control the verbosity of debug logging. Accepts python `logging` levels, e.g. `warn` (Default), `info`, `debug`, etc.|
 |`USERMAP_UID` | Set the UID that the OCR tools will run as.|
 |`USERMAP_GID` | Set the GID that the OCR tools will run as.|
@@ -157,6 +159,7 @@ Notes:
 |Variable|`OCR_OUTPUT_MODE`|`MIRROR_TREE`|Organizes a tree of output files that mirrors the input files. This is a good, non-surprising default for running as a NAS service.|
 |Variable|`OCR_ACTION_ON_SUCCESS`|`NOTHING`|By default, don't touch the input files after processing. This is a **safe** default for running as a NAS service, but **Note:** you may wish to customize this behavior once you're comfortable with ocrmypdf-auto operations!|
 |Variable|`OCR_PROCESS_EXISTING_ON_START`|`0`|Corresponding with the `OCR_ACTION_ON_SUCCESS`, we explicitly disable processing existing files on startup to avoid reprocessing all files every time the container is updated or unRAID is rebooted.|
+|Variable|`OCR_NOTIFY_URL`|``|URL that gets a POST if set, with a JSON that has a pdf (and txt if --sidecar is used) property set with the relative path of the output.|
 |Variable|`USERMAP_UID`|`99`|This is the UID of unRAID's `nobody` user. You should use this value unless you really know what you're doing!|
 |Variable|`USERMAP_GID`|`100`|This is the GID of unRAID's `users` group. You should use this value unless you really know what you're doing!|
 
