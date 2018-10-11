@@ -34,8 +34,40 @@ initialize() {
     populate_defaults
 }
 
+# With thanks adopted from http://github.com/danielquinn/paperless to work with ubuntu
+install_languages() {
+    local langs="$1"
+    read -ra langs <<<"$langs"
+
+    # Check that it is not empty
+    if [ ${#langs[@]} -eq 0 ]; then
+        return
+    fi
+
+    # Loop over languages to be installed
+    for lang in "${langs[@]}"; do
+        pkg="tesseract-ocr-$lang"
+
+        # English is installed by default
+        if [ "$lang" ==  "eng" ]; then
+            continue
+        fi
+
+        if ! apt show "$pkg" > /dev/null 2>&1; then
+            continue
+        fi
+
+        apt-get --no-upgrade -q install "$pkg"
+    done
+}
+
 if [[ "$1" != "/"* ]]; then
     initialize
+
+    # Install additional languages if specified
+    if [ ! -z "$OCR_LANGUAGES"  ]; then
+        install_languages "$OCR_LANGUAGES"
+    fi
 
     . /appenv/bin/activate
     cd /app
