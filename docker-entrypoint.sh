@@ -37,6 +37,7 @@ initialize() {
 # With thanks adopted from http://github.com/danielquinn/paperless to work with ubuntu
 install_languages() {
     local langs="$1"
+    local ran_update=0
     read -ra langs <<<"$langs"
 
     # Check that it is not empty
@@ -53,12 +54,27 @@ install_languages() {
             continue
         fi
 
-        if ! apt show "$pkg" > /dev/null 2>&1; then
+        # Skip if already installed
+        if dpkg -s $pkg > /dev/null 2>&1; then
             continue
         fi
 
+        # Ensure apt-cache is updated, since it's wiped in container build
+        if [ "$ran_update" != "1" ]; then
+            echo ---- Updating apt cache for Tessearct Language installation
+            apt-get -q update
+            ran_update=1
+        fi
+
+        echo ---- Installing Tesseract Langauge: $lang via $pkg
         apt-get --no-upgrade -q install "$pkg"
     done
+
+    if [ "$ran_update" == "1" ]; then
+        # Save a little space in the docker image by clearing the apt cache
+        echo ---- Cleaning apt cache
+        rm -rf /var/lib/apt/lists/*
+    fi
 }
 
 if [[ "$1" != "/"* ]]; then
