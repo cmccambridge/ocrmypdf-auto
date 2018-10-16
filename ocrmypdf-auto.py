@@ -1,6 +1,7 @@
 import fnmatch
 import logging
 import os
+import requests
 import sys
 import time
 import traceback
@@ -100,7 +101,7 @@ class OcrTask(object):
 
     COALESCING_DELAY = timedelta(seconds=try_float(os.getenv('OCR_PROCESSING_DELAY'), 3.0))
 
-    def __init__(self, input_path, output_path, submit_func, done_callback, config_file=None, success_action=ON_SUCCESS_DO_NOTHING, archive_path=None):
+    def __init__(self, input_path, output_path, submit_func, done_callback, config_file=None, success_action=ON_SUCCESS_DO_NOTHING, archive_path=None, notify_url=''):
         self.logger = logger.getChild('task')
         self.input_path = input_path
         self.output_path = output_path
@@ -113,6 +114,7 @@ class OcrTask(object):
         self.archive_path = archive_path
         if self.success_action == OcrTask.ON_SUCCESS_ARCHIVE and not self.archive_path:
             raise OcrTaskError('Archive path required for success action {}'.format(self.success_action))
+        self.notify_url = notify_url
         self.last_touch = None
         self.future = None
         self.state = OcrTask.NEW
@@ -242,6 +244,24 @@ class OcrTask(object):
                     self.input_path.move(self.archive_path)
                     self.logger.debug('Archived input file after successful OCR: %s -> %s', self.input_path, self.archive_path)
 
+        # Notify if notification url is set and run was successful
+        if rc == 0  and '' is not self.notify_url:
+            # Build json
+            output_data = {
+                "pdf": self.output_path
+            }
+
+            # Check if there is a txt file from --sidecar
+            # Apparently, it just tacks on .txt so files are called something.pdf.txt in the end
+            txt_path = self.output_path + '.txt'
+            if os.path.isfile(txt_path):
+                output_data['txt'] = txt_path
+
+            # Post json to notification url
+            # The json parameter will encode it and set the Content-Type header
+            r = requests.post(self.notify_url, json = output_data)
+            self.logger.debug('Sent notification to %s and got response code %s', self.notify_url, r.status_code)
+
         # We're done
         self.done()
 
@@ -295,7 +315,7 @@ class AutoOcrScheduler(object):
 
     OUTPUT_MODES = [SINGLE_FOLDER, MIRROR_TREE]
 
-    def __init__(self, config_dir, input_dir, output_dir, output_mode, success_action=OcrTask.ON_SUCCESS_DO_NOTHING, archive_dir=None, process_existing_files=False):
+    def __init__(self, config_dir, input_dir, output_dir, output_mode, success_action=OcrTask.ON_SUCCESS_DO_NOTHING, archive_dir=None, notify_url='', process_existing_files=False):
         self.logger = logger.getChild('scheduler')
 
         self.config_dir = local.path(config_dir)
@@ -313,6 +333,7 @@ class AutoOcrScheduler(object):
         if self.success_action == OcrTask.ON_SUCCESS_ARCHIVE and not self.archive_dir:
             raise AutoOcrSchedulerError('Archive directory required for success action {}'.format(self.success_action))
 
+        self.notify_url = notify_url
         self.current_tasks = {}
         self.current_outputs = set()
 
@@ -408,7 +429,8 @@ class AutoOcrScheduler(object):
                        self.on_task_done,
                        config_file=config_file,
                        success_action=self.success_action,
-                       archive_path=archive_file)
+                       archive_path=archive_file,
+                       notify_url=self.notify_url)
         self.current_tasks[path] = task
         self.current_outputs.add(output_path)
 
@@ -458,6 +480,7 @@ if __name__ == "__main__":
     input_dir = local.path(os.getenv('OCR_INPUT_DIR', '/input'))
     output_dir = local.path(os.getenv('OCR_OUTPUT_DIR', '/output'))
     output_mode = os.getenv('OCR_OUTPUT_MODE', AutoOcrScheduler.MIRROR_TREE)
+    notify_url = os.getenv('OCR_NOTIFY_URL', '')
     action_on_success = (os.getenv('OCR_ACTION_ON_SUCCESS', OcrTask.ON_SUCCESS_DO_NOTHING))
     archive_dir = local.path(os.getenv('OCR_ARCHIVE_DIR', '/archive'))
     process_existing_files = (os.getenv('OCR_PROCESS_EXISTING_ON_START', '0').lower() in ['1', 'y', 'yes', 't', 'true', 'on'])
@@ -469,6 +492,7 @@ if __name__ == "__main__":
                           output_mode,
                           success_action=action_on_success,
                           archive_dir=archive_dir,
+                          notify_url=notify_url,
                           process_existing_files=process_existing_files) as scheduler:
         # Wait in the main thread to be killed
         signum = docker_monitor.wait_for_exit()
