@@ -34,8 +34,56 @@ initialize() {
     populate_defaults
 }
 
+# With thanks adopted from http://github.com/danielquinn/paperless to work with ubuntu
+install_languages() {
+    local langs="$1"
+    local ran_update=0
+    read -ra langs <<<"$langs"
+
+    # Check that it is not empty
+    if [ ${#langs[@]} -eq 0 ]; then
+        return
+    fi
+
+    # Loop over languages to be installed
+    for lang in "${langs[@]}"; do
+        pkg="tesseract-ocr-$lang"
+
+        # English is installed by default
+        if [ "$lang" ==  "eng" ]; then
+            continue
+        fi
+
+        # Skip if already installed
+        if dpkg -s $pkg > /dev/null 2>&1; then
+            continue
+        fi
+
+        # Ensure apt-cache is updated, since it's wiped in container build
+        if [ "$ran_update" != "1" ]; then
+            echo ---- Updating apt cache for Tessearct Language installation
+            apt-get -q update
+            ran_update=1
+        fi
+
+        echo ---- Installing Tesseract Langauge: $lang via $pkg
+        apt-get --no-upgrade -q install "$pkg"
+    done
+
+    if [ "$ran_update" == "1" ]; then
+        # Save a little space in the docker image by clearing the apt cache
+        echo ---- Cleaning apt cache
+        rm -rf /var/lib/apt/lists/*
+    fi
+}
+
 if [[ "$1" != "/"* ]]; then
     initialize
+
+    # Install additional languages if specified
+    if [ ! -z "$OCR_LANGUAGES"  ]; then
+        install_languages "$OCR_LANGUAGES"
+    fi
 
     . /appenv/bin/activate
     cd /app

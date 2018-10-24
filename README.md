@@ -38,6 +38,7 @@ docker create \
   -v <appdata/config directory>:/config \
   -v <temp directory>:/ocrtemp \
   -v <archvie directory>:/archive \
+  -e OCR_LANGUAGES="deu chi-sim ita" \
   -e OCR_OUTPUT_MODE=MIRROR_TREE \
   -e OCR_PROCESS_EXISTING_ON_START=1 \
   -e OCR_ACTION_ON_SUCCESS=ARCHIVE_INPUT_FILES \
@@ -72,6 +73,7 @@ A few additional volumes may be mounted for advanced configuration:
 
 |Environment Variable|Description|
 |---|---|
+|`OCR_LANGUAGES` | Additional languages (besides English) to install. Given as a space separated list. All possible packages can be found on the [Ubuntu site][ocr-languages]. Example: `deu chi-sim ita` |
 |`OCR_OUTPUT_MODE` | Controls the output directory layout: <br /> `MIRROR_TREE` - (Default) Mirror the directory structure of the input directory, i.e. for an input file `/input/foo/bar.pdf` create an output file `/output/foo/bar.pdf`. <br /> `SINGLE_FOLDER` - Collect all output files in a single flat folder, i.e. for an input file `/input/foo/bar.pdf` create an output file `/output/bar.pdf`.|
 |`OCR_PROCESS_EXISTING_ON_START` | Set to `1` to enable processing of any files in the input directory when the container is launched. <br/> Set to `0` (Default) or unset to ignore existing files until they are modified.|
 |`OCR_ACTION_ON_SUCCESS` | Controls the action (if any) to perform after successful OCR processing: <br /> `NOTHING` - (Default) Do nothing. Input files remain in place where they were found. <br /> `ARCHIVE_INPUT_FILES` - Archive input files by **moving** them (overwriting existing files!) to the `/archive` Volume <br /> `DELETE_INPUT_FILES` - Delete the input file after successful processing.|
@@ -79,6 +81,8 @@ A few additional volumes may be mounted for advanced configuration:
 |`OCR_VERBOSITY` | Control the verbosity of debug logging. Accepts python `logging` levels, e.g. `warn` (Default), `info`, `debug`, etc.|
 |`USERMAP_UID` | Set the UID that the OCR tools will run as.|
 |`USERMAP_GID` | Set the GID that the OCR tools will run as.|
+
+[ocr-languages]: https://packages.ubuntu.com/search?keywords=tesseract-ocr-&searchon=names&suite=bionic&section=all
 
 ## OCRmyPDF Configuration Files
 
@@ -156,13 +160,13 @@ Notes:
 |Type|Setting|Value|Notes|
 |----|-------|-----|-----|
 |Path|`/config`|`/mnt/user/appdata/ocrmypdf-auto`|Store configuration files (ocr.config) in standard unRAID appdata location|
+|Variable|`OCR_LANGUAGES`|``|Additional languages (besides English) to install. Given as a space separated list. Example: `deu chi-sim ita` |
 |Variable|`OCR_OUTPUT_MODE`|`MIRROR_TREE`|Organizes a tree of output files that mirrors the input files. This is a good, non-surprising default for running as a NAS service.|
 |Variable|`OCR_ACTION_ON_SUCCESS`|`NOTHING`|By default, don't touch the input files after processing. This is a **safe** default for running as a NAS service, but **Note:** you may wish to customize this behavior once you're comfortable with ocrmypdf-auto operations!|
 |Variable|`OCR_PROCESS_EXISTING_ON_START`|`0`|Corresponding with the `OCR_ACTION_ON_SUCCESS`, we explicitly disable processing existing files on startup to avoid reprocessing all files every time the container is updated or unRAID is rebooted.|
 |Variable|`OCR_NOTIFY_URL`|``|URL that gets a POST if set, with a JSON that has a pdf (and txt if --sidecar is used) property set with the relative path of the output.|
 |Variable|`USERMAP_UID`|`99`|This is the UID of unRAID's `nobody` user. You should use this value unless you really know what you're doing!|
 |Variable|`USERMAP_GID`|`100`|This is the GID of unRAID's `users` group. You should use this value unless you really know what you're doing!|
-
 
 [unraid]: https://lime-technology.com/
 [ca]: https://lime-technology.com/forums/topic/38582-plug-in-community-applications/
