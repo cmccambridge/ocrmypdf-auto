@@ -4,8 +4,5 @@
 
 Dockerfile
 env/
-testarchive/
-testconfig/
-testin/
-testout/
-testtemp/
+media/
+test*/
