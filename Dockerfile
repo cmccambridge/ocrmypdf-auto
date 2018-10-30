@@ -21,12 +21,12 @@ RUN . /appenv/bin/activate; \
     pip install --upgrade pip
 
 # Pull in ocrmypdf via requirements.txt and install pinned version
-COPY requirements.txt /app/
+COPY src/requirements.txt /app/
 
 RUN . /appenv/bin/activate; \
     pip install -r /app/requirements.txt
 
-COPY . /app/
+COPY src/ /app/
 
 # Create restricted privilege user docker:docker to drop privileges
 # to later. We retain root for the entrypoint in order to install
