@@ -1,3 +1,4 @@
+import concurrent.futures
 import fnmatch
 import logging
 import os
@@ -14,6 +15,10 @@ from watchdog.events import PatternMatchingEventHandler
 from docker_support import DockerSignalMonitor
 
 logger = logging.getLogger('ocrmypdf-auto')
+test_logger = logging.getLogger('test-ocrmypdf-auto')
+
+def test_log(msg, *args):
+    test_logger.critical('TEST\0' + msg, *args)
 
 class AutoOcrError(Exception):
     pass
@@ -206,6 +211,7 @@ class OcrTask(object):
 
         runtime = datetime.now() - start_ts
         self.logger.warn('Processing complete in %f seconds with status %d: %s', round(runtime.total_seconds(), 2), rc, self.input_path)
+        test_log('OCR_PROCESS_RESULT\0%s\0%s\0%d\0%f', self.input_path, self.output_path, rc, round(runtime.total_seconds(), 2))
 
         # Check for modification during sleep
         if self.last_touch is not None:
@@ -315,7 +321,18 @@ class AutoOcrScheduler(object):
 
     OUTPUT_MODES = [SINGLE_FOLDER, MIRROR_TREE]
 
-    def __init__(self, config_dir, input_dir, output_dir, output_mode, success_action=OcrTask.ON_SUCCESS_DO_NOTHING, archive_dir=None, notify_url='', process_existing_files=False):
+    def __init__(
+            self,
+            config_dir,
+            input_dir,
+            output_dir,
+            output_mode,
+            success_action=OcrTask.ON_SUCCESS_DO_NOTHING,
+            archive_dir=None,
+            notify_url='',
+            process_existing_files=False,
+            run_scheduler=True,
+        ):
         self.logger = logger.getChild('scheduler')
 
         self.config_dir = local.path(config_dir)
@@ -335,6 +352,7 @@ class AutoOcrScheduler(object):
 
         self.notify_url = notify_url
         self.current_tasks = {}
+        self.walk_existing_task = None
         self.current_outputs = set()
 
         # Create a Threadpool to run OCR tasks on
@@ -344,14 +362,18 @@ class AutoOcrScheduler(object):
         watchdog_handler = AutoOcrWatchdogHandler(self.on_file_touched, self.on_file_deleted)
 
         # Schedule watchdog to observe the input directory
-        self.observer = Observer()
-        self.observer.schedule(watchdog_handler, self.input_dir, recursive=True)
-        self.observer.start()
-        self.logger.warn('Watching %s', self.input_dir)
+        if run_scheduler:
+            self.observer = Observer()
+            self.observer.schedule(watchdog_handler, self.input_dir, recursive=True)
+            self.observer.start()
+            self.logger.warn('Watching %s', self.input_dir)
+        else:
+            self.observer = None
+            self.logger.warn('Not watching %s', self.input_dir)
 
         # Process existing files in input directory, if requested
         if process_existing_files:
-            self.threadpool.submit(self.walk_existing_files)
+            self.walk_existing_task = self.threadpool.submit(self.walk_existing_files)
 
     def shutdown(self):
         # Shut down the feed of incoming watchdog events
@@ -361,6 +383,9 @@ class AutoOcrScheduler(object):
             self.observer.stop()
 
         # Cancel all outstanding cancelable tasks
+        if self.walk_existing_task:
+            self.logger.debug('Canceling walk existing files task...')
+            self.walk_existing_task.cancel()
         self.logger.debug('Canceling all %d in-flight tasks...', len(self.current_tasks))
         tasks = [task for _, task in self.current_tasks.items()]
         for task in tasks:
@@ -440,6 +465,7 @@ class AutoOcrScheduler(object):
             return any([fnmatch.fnmatch(file, pattern) for pattern in AutoOcrWatchdogHandler.MATCH_PATTERNS])
         for file in self.input_dir.walk(filter=keep_file):
             self.on_file_touched(file)
+        self.walk_existing_task = None
 
     def on_file_touched(self, path):
         if path in self.current_tasks:
@@ -455,12 +481,25 @@ class AutoOcrScheduler(object):
         self.current_outputs.remove(task.output_path)
         del self.current_tasks[task.input_path]
 
+    def wait_for_idle(self):
+        if self.walk_existing_task:
+            self.logger.debug('Waiting for walk existing files to complete...')
+            concurrent.futures.wait([self.walk_existing_task])
+        while self.current_tasks:
+            self.logger.debug('Waiting for %d tasks to complete...', len(self.current_tasks))
+            concurrent.futures.wait([task.future for _, task in self.current_tasks.items()])
+
 
 if __name__ == "__main__":
     logging_level = os.getenv('OCR_VERBOSITY')
-    if logging_level is None:
+
+    test_logging = (logging_level and str(logging_level).lower() == 'test')
+    if test_logging:
+        # Output DEBUG level alongside test output
+        logging_level = logging.DEBUG
+    elif not logging_level:
         logging_level = logging.WARNING
-    elif getattr(logging, logging_level.upper(), None) is not None:
+    elif getattr(logging, logging_level.upper(), None):
         logging_level = getattr(logging, logging_level.upper())
     else:
         logging_level = int(try_float(logging_level, logging.WARNING))
@@ -473,9 +512,13 @@ if __name__ == "__main__":
         logging.basicConfig(level=logging_level,
                             format='%(asctime)s - %(message)s',
                             datefmt='%Y-%m-%d %H:%M:%S')
+    
+    if not test_logging:
+        test_logger.propagate = False
 
     docker_monitor = DockerSignalMonitor()
 
+    YES_LIKE_VALUES = ['1', 'y', 'yes', 't', 'true', 'on']
     config_dir = local.path(os.getenv('OCR_CONFIG_DIR', '/config'))
     input_dir = local.path(os.getenv('OCR_INPUT_DIR', '/input'))
     output_dir = local.path(os.getenv('OCR_OUTPUT_DIR', '/output'))
@@ -483,9 +526,16 @@ if __name__ == "__main__":
     notify_url = os.getenv('OCR_NOTIFY_URL', '')
     action_on_success = (os.getenv('OCR_ACTION_ON_SUCCESS', OcrTask.ON_SUCCESS_DO_NOTHING))
     archive_dir = local.path(os.getenv('OCR_ARCHIVE_DIR', '/archive'))
-    process_existing_files = (os.getenv('OCR_PROCESS_EXISTING_ON_START', '0').lower() in ['1', 'y', 'yes', 't', 'true', 'on'])
+    process_existing_files = (os.getenv('OCR_PROCESS_EXISTING_ON_START', '0').lower() in YES_LIKE_VALUES)
+    single_shot_mode = (os.getenv('OCR_DO_NOT_RUN_SCHEDULER', '0').lower() in YES_LIKE_VALUES)
 
-    # Run an AutoOcrScheduler until terminated
+    if single_shot_mode and not process_existing_files:
+        logger.error(
+            'Setting OCR_DO_NOT_RUN_SCHEDULER without OCR_PROCESS_EXISTING_ON_START '
+            'results in nothing happening!'
+        )
+
+    # Run an AutoOcrScheduler
     with AutoOcrScheduler(config_dir,
                           input_dir,
                           output_dir,
@@ -493,8 +543,13 @@ if __name__ == "__main__":
                           success_action=action_on_success,
                           archive_dir=archive_dir,
                           notify_url=notify_url,
-                          process_existing_files=process_existing_files) as scheduler:
-        # Wait in the main thread to be killed
-        signum = docker_monitor.wait_for_exit()
-        logger.warn('Signal %d (%s) Received. Shutting down...', signum, DockerSignalMonitor.SIGNUMS_TO_NAMES[signum])
-
+                          process_existing_files=process_existing_files,
+                          run_scheduler=(not single_shot_mode)) as scheduler:
+        if single_shot_mode:
+            # Wait for all initial (process existing) tasks to complete
+            scheduler.wait_for_idle()
+            logger.warn('No remaining OCR tasks, and scheduler not started. Shutting down...')
+        else:
+            # Wait in the main thread to be terminated
+            signum = docker_monitor.wait_for_exit()
+            logger.warn('Signal %d (%s) Received. Shutting down...', signum, DockerSignalMonitor.SIGNUMS_TO_NAMES[signum])

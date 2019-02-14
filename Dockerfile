@@ -33,7 +33,8 @@ COPY src/ /app/
 # additional tesseract OCR language packages.
 RUN groupadd -g 1000 docker && \
     useradd -u 1000 -g docker -N --home-dir /app docker && \
-    chown -Rh docker:docker /app && \
+    mkdir /config /input /output /ocrtemp /archive && \
+    chown -Rh docker:docker /app /config /input /output /ocrtemp /archive && \
     chmod 755 /app/docker-entrypoint.sh
 
 VOLUME ["/config", "/input", "/output", "/ocrtemp", "/archive"]
