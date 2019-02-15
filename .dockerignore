@@ -3,9 +3,9 @@
 *~
 
 Dockerfile
+.circleci
+.pytest_cache
+.venv
 env/
-testarchive/
-testconfig/
-testin/
-testout/
-testtemp/
+media/
+test*/

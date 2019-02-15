@@ -1,0 +1,3 @@
+docker~=3.5.1
+pytest~=3.9.3
+plumbum~=1.6.7

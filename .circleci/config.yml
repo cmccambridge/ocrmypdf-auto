@@ -1,7 +1,8 @@
-# CircleCI 2.0 configuration file
-version: 2
+# CircleCI 2.1 configuration file
+version: 2.1
+
 jobs:
-  build:
+  build_test:
     docker:
       - image: circleci/python:3.7.2
 
@@ -10,4 +11,55 @@ jobs:
       - setup_remote_docker
       - run:
           name: Build Docker image
-          command: docker build -t cmccambridge/ocrmypdf-auto .
+          command: docker build -t ocrmypdf-auto .
+      - run:
+          name: Test Docker image
+          command: |
+            python3 -m venv .venv
+            source .venv/bin/activate
+            pip install -r tests/requirements.txt
+            mkdir -p test-results/docker
+            pytest --junit-xml=test-results/docker/results.xml tests/
+      - store_test_results:
+          path: test-results
+      - run:
+          name: Persist Docker image to workspace (master only)
+          command: |
+            mkdir -p docker-image
+            if [ "${CIRCLE_BRANCH}" == "master" ]; then
+              docker save --output docker-image/image.tar
+            fi
+      - persist_to_workspace:
+          root: docker-image
+          paths:
+            - "*.tar"
+
+  deploy:
+    docker:
+      - image: circleci/python:3.7.2
+    steps:
+      - setup_remote_docker
+      - attach_workspace:
+          at: build-output
+      - run:
+          name: "Load Docker image"
+          command: |
+            docker load --input build-output/image.tar
+            docker images
+      - run:
+          name: "Push to quay.io as :beta"
+          command: |
+            echo $QUAYIO_PASSWORD | docker login -u $QUAYIO_USER --password-stdin quay.io
+            docker tag ocrmypdf-auto quay.io/cmccambridge/ocrmypdf-auto:beta
+            docker push quay.io/cmccambridge/ocrmypdf-auto:beta
+
+workflows:
+  build_test_deploy:
+    jobs:
+      - build_test
+      - deploy:
+          requires:
+            - build_test
+          filters:
+            branches:
+              only: master
