@@ -26,6 +26,7 @@ jobs:
           name: Persist Docker image to workspace (master only)
           command: |
             mkdir -p docker-image
+            touch docker-image/dummy.tar
             if [ "${CIRCLE_BRANCH}" == "master" ]; then
               docker save --output docker-image/image.tar
             fi
