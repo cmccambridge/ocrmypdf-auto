@@ -43,7 +43,8 @@ class OcrmypdfConfig(object):
 
     def set_default_options(self):
         langs = os.getenv('OCR_LANGUAGES')
-        if langs is not None:
+        if langs:
+            langs = '+'.join(langs.split())
             self.options['--language'] = langs
 
     def parse_config_file(self, config_file):
