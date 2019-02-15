@@ -46,7 +46,6 @@ jobs:
           name: "Load Docker image"
           command: |
             docker load --input build-output/image.tar
-            docker images
       - run:
           name: "Push to quay.io as :beta"
           command: |

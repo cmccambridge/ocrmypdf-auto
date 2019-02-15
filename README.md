@@ -1,7 +1,7 @@
 ![ocrmypdf-auto logo](https://raw.githubusercontent.com/cmccambridge/ocrmypdf-auto/master/media/logo.png)
 
 # cmccambridge/ocrmypdf-auto
-[![Docker Repository on Quay](https://quay.io/repository/cmccambridge/ocrmypdf-auto/status "Docker Repository on Quay")](https://quay.io/repository/cmccambridge/ocrmypdf-auto)
+[![Docker Repository on Quay](https://quay.io/repository/cmccambridge/ocrmypdf-auto/status "Docker Repository on Quay")](https://quay.io/repository/cmccambridge/ocrmypdf-auto) [![CircleCI](https://circleci.com/gh/cmccambridge/ocrmypdf-auto/tree/master.svg?style=shield)](https://circleci.com/gh/cmccambridge/ocrmypdf-auto/tree/master)
 
 This container automates one stage in a "paperless" document processing pipeline: Take all the PDFs in a folder, run OCR on them, and save the output to another folder. It combines the excellent tools [OCRmyPDF][ocrmypdf] and [tesseract-ocr][tesseract] with `inotify`-based file monitoring and some new configurability.
 
