@@ -170,7 +170,7 @@ class OcrTask(object):
 
     def process(self, skip_delay=False):
         """OCR processing task"""
-        self.logger.warn('Processing: %s -> %s', self.input_path, self.output_path)
+        self.logger.warning('Processing: %s -> %s', self.input_path, self.output_path)
         start_ts = datetime.now()
 
         # Coalescing sleep as long as file is still being modified
@@ -211,7 +211,7 @@ class OcrTask(object):
             self.logger.info('OCRmyPDF failed with rc %d stdout [%s] and stderr [%s]', rc, stdout, stderr)
 
         runtime = datetime.now() - start_ts
-        self.logger.warn('Processing complete in %f seconds with status %d: %s', round(runtime.total_seconds(), 2), rc, self.input_path)
+        self.logger.warning('Processing complete in %f seconds with status %d: %s', round(runtime.total_seconds(), 2), rc, self.input_path)
         test_log('OCR_PROCESS_RESULT\0%s\0%s\0%d\0%f', self.input_path, self.output_path, rc, round(runtime.total_seconds(), 2))
 
         # Check for modification during sleep
@@ -231,12 +231,12 @@ class OcrTask(object):
             # 2. Output file's modification time MUST be more recent than the input file's
             #    modification time captured at job start
             if output_mtime < input_mtime_before:
-                self.logger.warn('Not %s input file. Output file %s was modified earlier [%s] than input file %s was modified [%s]',
+                self.logger.warning('Not %s input file. Output file %s was modified earlier [%s] than input file %s was modified [%s]',
                                  'deleting' if self.success_action == OcrTask.ON_SUCCESS_DELETE_INPUT else 'archiving',
                                  self.output_path, output_mtime,
                                  self.input_path, input_mtime_before)
             elif input_mtime_after != input_mtime_before:
-                self.logger.warn('Not %s input file. Input file %s modification time after OCR task [%s] is not equal to before task [%s]',
+                self.logger.warning('Not %s input file. Input file %s modification time after OCR task [%s] is not equal to before task [%s]',
                                  'deleting' if self.success_action == OcrTask.ON_SUCCESS_DELETE_INPUT else 'archiving',
                                  self.input_path,
                                  input_mtime_after, input_mtime_before)
@@ -252,7 +252,7 @@ class OcrTask(object):
                     self.logger.debug('Archived input file after successful OCR: %s -> %s', self.input_path, self.archive_path)
 
         # Notify if notification url is set and run was successful
-        if rc == 0  and '' is not self.notify_url:
+        if rc == 0  and '' != self.notify_url:
             # Build json
             output_data = {
                 "pdf": self.output_path
@@ -278,7 +278,7 @@ class AutoOcrWatchdogHandler(PatternMatchingEventHandler):
     Matches files to process through OCR and kicks off processing
     """
 
-    MATCH_PATTERNS = ['*.pdf']
+    MATCH_PATTERNS = ['*.pdf', '*.jpg']
 
     def __init__(self, file_touched_callback, file_deleted_callback):
         super(AutoOcrWatchdogHandler, self).__init__(patterns = AutoOcrWatchdogHandler.MATCH_PATTERNS, ignore_directories=True)
@@ -367,10 +367,10 @@ class AutoOcrScheduler(object):
             self.observer = Observer()
             self.observer.schedule(watchdog_handler, self.input_dir, recursive=True)
             self.observer.start()
-            self.logger.warn('Watching %s', self.input_dir)
+            self.logger.warning('Watching %s', self.input_dir)
         else:
             self.observer = None
-            self.logger.warn('Not watching %s', self.input_dir)
+            self.logger.warning('Not watching %s', self.input_dir)
 
         # Process existing files in input directory, if requested
         if process_existing_files:
@@ -549,8 +549,8 @@ if __name__ == "__main__":
         if single_shot_mode:
             # Wait for all initial (process existing) tasks to complete
             scheduler.wait_for_idle()
-            logger.warn('No remaining OCR tasks, and scheduler not started. Shutting down...')
+            logger.warning('No remaining OCR tasks, and scheduler not started. Shutting down...')
         else:
             # Wait in the main thread to be terminated
             signum = docker_monitor.wait_for_exit()
-            logger.warn('Signal %d (%s) Received. Shutting down...', signum, DockerSignalMonitor.SIGNUMS_TO_NAMES[signum])
+            logger.warning('Signal %d (%s) Received. Shutting down...', signum, DockerSignalMonitor.SIGNUMS_TO_NAMES[signum])
