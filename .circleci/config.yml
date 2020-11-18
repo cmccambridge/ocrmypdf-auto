@@ -18,15 +18,10 @@ jobs:
             echo $DOCKERHUB_PASSWORD | docker login -u $DOCKERHUB_USER --password-stdin
       - run:
           name: Build Docker image
-          command: docker build -t ocrmypdf-auto .
+          command: make ocrmypdf-auto
       - run:
           name: Test Docker image
-          command: |
-            python3 -m venv .venv
-            source .venv/bin/activate
-            pip install -r tests/requirements.txt
-            mkdir -p test-results/docker
-            pytest --junit-xml=test-results/docker/results.xml tests/
+          command: make test
       - store_test_results:
           path: test-results
       - run:
