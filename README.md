@@ -1,7 +1,7 @@
 ![ocrmypdf-auto logo](https://raw.githubusercontent.com/cmccambridge/ocrmypdf-auto/master/media/logo.png)
 
 # cmccambridge/ocrmypdf-auto
-[![Docker Repository on Quay](https://quay.io/repository/cmccambridge/ocrmypdf-auto/status "Docker Repository on Quay")](https://quay.io/repository/cmccambridge/ocrmypdf-auto) [![CircleCI](https://circleci.com/gh/cmccambridge/ocrmypdf-auto/tree/master.svg?style=shield)](https://circleci.com/gh/cmccambridge/ocrmypdf-auto/tree/master)
+[![CircleCI](https://circleci.com/gh/cmccambridge/ocrmypdf-auto/tree/master.svg?style=shield)](https://circleci.com/gh/cmccambridge/ocrmypdf-auto/tree/master)
 
 This container automates one stage in a "paperless" document processing pipeline: Take all the PDFs in a folder, run OCR on them, and save the output to another folder. It combines the excellent tools [OCRmyPDF][ocrmypdf] and [tesseract-ocr][tesseract] with `inotify`-based file monitoring and some new configurability.
 
@@ -27,7 +27,7 @@ docker create \
   -v <input directory>:/input \
   -v <output directory>:/output \
   -v <appdata/config directory>:/config \
-  quay.io/cmccambridge/ocrmypdf-auto
+  cmccambridge/ocrmypdf-auto
 ```
 
 Full Custom:
@@ -43,7 +43,7 @@ docker create \
   -e OCR_PROCESS_EXISTING_ON_START=1 \
   -e OCR_ACTION_ON_SUCCESS=ARCHIVE_INPUT_FILES \
   -e OCR_NOTIFY_URL=http://server.local/path \
-  quay.io/cmccambridge/ocrmypdf-auto
+  cmccambridge/ocrmypdf-auto
 ```
 
 ## Volumes
@@ -175,12 +175,10 @@ Notes:
 ## Future Work
 
 Some specific future work items I have planned:
-* [#2][i2] Add automatic OCR language pack installation (via tesseract language packages) 
-* [#3][i3] Build an Alpine-based image for size reduction (requires tesseract v4 to be supported in Alpine for best quality results)
+* [#3][i3] Evaluate image size reductions of an Alpine-based docker image... OR, migrate to the upstream `OCRmyPDF` docker image for ease of maintenance.
 
 Please also see the [GitHub Issues][issues], where you can report any problems or make any feature requests as well!
 
-[i2]: https://github.com/cmccambridge/ocrmypdf-auto/issues/2
 [i3]: https://github.com/cmccambridge/ocrmypdf-auto/issues/3
 [issues]: https://github.com/cmccambridge/ocrmypdf-auto/issues/
 
