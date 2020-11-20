@@ -1,4 +1,4 @@
-plumbum==1.6.9
+plumbum~=1.6.9
 ocrmypdf==11.3.3
-watchdog==0.10.3
+watchdog~=0.10.3
 requests~=2.25.0

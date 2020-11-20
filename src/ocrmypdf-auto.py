@@ -252,7 +252,7 @@ class OcrTask(object):
                     self.logger.debug('Archived input file after successful OCR: %s -> %s', self.input_path, self.archive_path)
 
         # Notify if notification url is set and run was successful
-        if rc == 0  and '' != self.notify_url:
+        if rc == 0  and self.notify_url:
             # Build json
             output_data = {
                 "pdf": self.output_path
