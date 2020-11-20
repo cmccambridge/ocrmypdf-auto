@@ -31,3 +31,5 @@ endif
 	docker pull cmccambridge/ocrmypdf-auto:beta
 	docker tag cmccambridge/ocrmypdf-auto:beta cmccambridge/ocrmypdf-auto:$(RELEASE_TAG)
 	docker push cmccambridge/ocrmypdf-auto:$(RELEASE_TAG)
+	docker tag cmccambridge/ocrmypdf-auto:beta quay.io/cmccambridge/ocrmypdf-auto:$(RELEASE_TAG)
+	docker push quay.io/cmccambridge/ocrmypdf-auto:$(RELEASE_TAG)
