@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 from functools import partial
 from plumbum import local, BG
 from watchdog.observers import Observer
+from watchdog.observers.polling import PollingObserver
 from watchdog.events import PatternMatchingEventHandler
 from docker_support import DockerSignalMonitor
 
@@ -333,6 +334,7 @@ class AutoOcrScheduler(object):
             notify_url='',
             process_existing_files=False,
             run_scheduler=True,
+            polling_observer=False,
         ):
         self.logger = logger.getChild('scheduler')
 
@@ -364,7 +366,7 @@ class AutoOcrScheduler(object):
 
         # Schedule watchdog to observe the input directory
         if run_scheduler:
-            self.observer = Observer()
+            self.observer = PollingObserver() if polling_observer else Observer()
             self.observer.schedule(watchdog_handler, self.input_dir, recursive=True)
             self.observer.start()
             self.logger.warning('Watching %s', self.input_dir)
@@ -529,6 +531,7 @@ if __name__ == "__main__":
     archive_dir = local.path(os.getenv('OCR_ARCHIVE_DIR', '/archive'))
     process_existing_files = (os.getenv('OCR_PROCESS_EXISTING_ON_START', '0').lower() in YES_LIKE_VALUES)
     single_shot_mode = (os.getenv('OCR_DO_NOT_RUN_SCHEDULER', '0').lower() in YES_LIKE_VALUES)
+    polling_observer = (os.getenv('OCR_USE_POLLING_SCHEDULER', '0').lower() in YES_LIKE_VALUES)
 
     if single_shot_mode and not process_existing_files:
         logger.error(
@@ -545,7 +548,8 @@ if __name__ == "__main__":
                           archive_dir=archive_dir,
                           notify_url=notify_url,
                           process_existing_files=process_existing_files,
-                          run_scheduler=(not single_shot_mode)) as scheduler:
+                          run_scheduler=(not single_shot_mode),
+                          polling_observer=polling_observer) as scheduler:
         if single_shot_mode:
             # Wait for all initial (process existing) tasks to complete
             scheduler.wait_for_idle()
